@@ -1,0 +1,28 @@
+# Telegram Bot
+pyTelegramBotAPI[async]==4.14.0
+
+# Crypto Exchange
+ccxt[async]==4.1.74
+
+# Database
+aiosqlite==0.19.0
+
+# HTTP
+aiohttp==3.9.1
+aiofiles==23.2.0
+
+# Data Models
+pydantic==2.5.2
+pydantic-settings==2.1.0
+
+# Cryptography
+cryptography==45.0.6
+
+# Utils
+python-dotenv==1.0.0
+loguru==0.7.2
+
+# Data Processing
+pandas==2.0.3
+openpyxl==3.1.2
+
