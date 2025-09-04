@@ -8,7 +8,8 @@ from fake_useragent import UserAgent
 from api.bitget_api import BitgetAPI
 from database.repositories.limit_order_repo import LimitOrderRepository
 from database.repositories.take_profit_repo import TakeProfitRepository
-from config.constants import COINS, CHECK_DELAY
+from config.constants import COINS, CHECK_DELAY, LEVERAGE, MARGIN_MODE
+from trading.grid_builder import build_grid
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,89 @@ class OrderTracker:
         
         self.limit_repo = LimitOrderRepository()
         self.tp_repo = TakeProfitRepository()
+
+        self.is_grid_open = False
+
+    async def open_grid(self, symbol: str, user_id: int, position_id: int, deposit_amount: Decimal):
+        """Открытие грид-сетки ордеров"""
+        try:
+            # 1. Устанавливаем плечо и режим маржи
+            await self.api.set_leverage(symbol, LEVERAGE)
+            await self.api.set_margin_mode(symbol, MARGIN_MODE)
+            
+            # 2. Получаем текущую цену
+            current_price = await self.api.get_ticker_price(symbol)
+            if not current_price:
+                logger.error(f"❌ Не удалось получить цену {symbol}")
+                return False
+            
+            # 3. Строим сетку ордеров
+            orders = build_grid(user_id, position_id, symbol, current_price, deposit_amount)
+            
+            # 4. Размещаем ордера на бирже
+            for order in orders:
+                if order.order_type.value == "market":
+                    # Рыночный ордер
+                    result = await self.api.create_market_order(symbol, order.side, order.quantity)
+                else:
+                    # Лимитный ордер  
+                    result = await self.api.create_limit_order(symbol, order.side, order.quantity, order.price)
+                
+                if result:
+                    # Сохраняем в БД с реальным ID от биржи
+                    order.order_id = result['id']
+                    await self.limit_repo.save_order(order)
+                
+                await asyncio.sleep(0.1)  # Пауза между ордерами
+            
+            logger.info(f"✅ Открыта грид-сетка для {symbol}: {len(orders)} ордеров")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка открытия сетки {symbol}: {e}")
+            return False
+
+    async def close_grid(self, symbol: str):
+        """Закрытие грид-сетки: отмена всех лимитных ордеров"""
+        try:
+            # 1. Получаем активные лимитные ордера из БД
+            order_ids = await self.limit_repo.get_orders_ids(symbol)
+            
+            if not order_ids:
+                logger.info(f"Нет активных ордеров для закрытия {symbol}")
+                return True
+            
+            cancelled_count = 0
+            
+            # 2. Отменяем каждый ордер на бирже
+            for order_id in order_ids:
+                success = await self.api.cancel_order(order_id, symbol)
+                if success:
+                    # 3. Обновляем статус в БД
+                    await self.limit_repo.update_order_status(order_id, 'cancelled')
+                    cancelled_count += 1
+                
+                await asyncio.sleep(0.1)  # Пауза между отменами
+            
+            logger.info(f"✅ Закрыта грид-сетка {symbol}: отменено {cancelled_count}/{len(order_ids)} ордеров")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка закрытия сетки {symbol}: {e}")
+            return False
     
     async def track_symbol(self, symbol: str):
         """Основная функция отслеживания символа"""
-        logger.info(f"🎯 Начинаем отслеживание {symbol}")
+        if self.is_grid_open:
+            return
         
+        logger.info(f"🎯 Начинаем отслеживание {symbol}")
+
         while True:
             try:
+                if not self.is_grid_open:
+                    await self.open_grid(symbol)
+
                 # 1. Проверяем тейк-профит
                 tp_order = await self.tp_repo.get_take_profit(symbol)
                 
@@ -37,7 +114,8 @@ class OrderTracker:
                     if tp_status == 'filled':
                         logger.info(f"✅ Тейк-профит исполнен для {symbol}, ожидание 60 сек")
                         await self.tp_repo.mark_take_profit_filled(tp_order['order_id'])
-                        #TODO: close the grid
+                        await self.close_grid(symbol)
+                        self.is_grid_open = False
                         await asyncio.sleep(60)  # Ожидание для новых участников
                         continue
                 

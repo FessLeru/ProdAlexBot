@@ -71,19 +71,6 @@ class OrderModel(BaseModel):
     check_count: int = 0
     error_count: int = 0
 
-class PositionModel(BaseModel):
-    id: Optional[int] = None
-    user_id: int
-    symbol: str
-    status: PositionStatus
-    allocated_amount: Decimal
-    average_entry_price: Optional[Decimal] = None
-    total_quantity: Decimal = Decimal('0')
-    take_profit_price: Optional[Decimal] = None
-    take_profit_order_id: Optional[str] = None
-    created_at: Optional[datetime] = None
-    closed_at: Optional[datetime] = None
-    profit_loss: Optional[Decimal] = None
 
 class UserModel(BaseModel):
     id: Optional[int] = None
@@ -98,22 +85,3 @@ class UserModel(BaseModel):
     is_following_trader: bool = False
     subscription_time: Optional[datetime] = None
     created_at: Optional[datetime] = None
-
-class MasterTradeSignal(BaseModel):
-    """Сигнал от мастер-трейдера"""
-    signal_id: str
-    trader_id: str
-    action: str  # "open_position", "close_position", "update_tp"
-    symbol: str
-    side: OrderSide
-    amount: Decimal
-    price: Optional[Decimal] = None
-    take_profit: Optional[Decimal] = None
-    timestamp: datetime
-
-class OrderBatch(BaseModel):
-    """Батч ордеров для оптимизированной проверки"""
-    symbol: str
-    order_ids: List[str]
-    last_check: datetime
-    priority: int = 0  # 0 - высокий, 1 - средний, 2 - низкий

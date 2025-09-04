@@ -76,16 +76,22 @@ class BitgetAPI:
             logger.error(f"❌ Ошибка получения цены {symbol}: {e}")
             return None
 
-    async def create_market_order(self, symbol: str, side: OrderSide, amount: Decimal) -> Optional[Dict]:
-        """Создание маркет-ордера"""
+    async def create_market_order(self, symbol: str, side: OrderSide, amount: Decimal, margin_coin: str = "USDT") -> Optional[Dict]:
+        """Создание маркет-ордера для фьючерсов"""
         try:
             await self.rate_limiter.acquire(f"create_order_{symbol}")
+            
+            params = {
+                'marginCoin': margin_coin,
+                'marginMode': 'cross',
+                'productType': 'USDT-FUTURES'  # Явно указываем тип продукта
+            }
             
             order = await self.exchange.create_market_order(
                 symbol=symbol,
                 side=side.value,
                 amount=float(amount),
-                params={'marginCoin': 'USDT'}
+                params=params
             )
             
             logger.info(f"✅ Создан маркет-ордер {order['id']} {side.value} {amount} {symbol}")
@@ -99,13 +105,15 @@ class BitgetAPI:
         """Создание лимит-ордера"""
         try:
             await self.rate_limiter.acquire(f"create_order_{symbol}")
-            
             order = await self.exchange.create_limit_order(
                 symbol=symbol,
                 side=side.value,
                 amount=float(amount),
                 price=float(price),
-                params={'marginCoin': 'USDT'}
+                params={
+                    'marginCoin': 'USDT',
+                    'marginMode': 'cross'
+                }
             )
             
             logger.info(f"✅ Создан лимит-ордер {order['id']} {side.value} {amount} {symbol} @ {price}")
@@ -170,12 +178,16 @@ class BitgetAPI:
             logger.error(f"❌ Ошибка получения позиций: {e}")
             return []
 
-    async def set_leverage(self, symbol: str, leverage: int) -> bool:
+    async def set_leverage(self, symbol: str, leverage: int, margin_coin: str = "USDT") -> bool:
         """Установка плеча"""
         try:
             await self.rate_limiter.acquire(f"leverage_{symbol}")
             
-            await self.exchange.set_leverage(leverage, symbol)
+            params = {
+                'marginCoin': margin_coin
+            }
+            
+            await self.exchange.set_leverage(leverage, symbol, params=params)
             logger.info(f"✅ Установлено плечо {leverage}x для {symbol}")
             return True
             
@@ -183,18 +195,19 @@ class BitgetAPI:
             logger.error(f"❌ Ошибка установки плеча для {symbol}: {e}")
             return False
 
-    async def set_margin_mode(self, symbol: str, margin_mode: str = "cross") -> bool:
+    async def set_margin_mode(self, symbol: str, margin_mode: str = "cross", margin_coin: str = "USDT") -> bool:
         """Установка режима маржи"""
         try:
             await self.rate_limiter.acquire(f"margin_mode_{symbol}")
             
-            # Специфичный для Bitget запрос
+            # Специфичный для Bitget запрос с marginCoin
             params = {
                 'symbol': symbol,
-                'marginMode': margin_mode
+                'marginMode': margin_mode,
+                'marginCoin': margin_coin
             }
             
-            await self.exchange.set_margin_mode(margin_mode, symbol)
+            await self.exchange.set_margin_mode(margin_mode, symbol, params=params)
             logger.info(f"✅ Установлен режим маржи {margin_mode} для {symbol}")
             return True
             

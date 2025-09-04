@@ -121,6 +121,35 @@ class LimitOrderRepository:
             order_id = update[3]  # order_id последний в tuple
             await self._invalidate_order_cache(order_id)
     
+    async def save_order(self, order) -> bool:
+        """Сохранение нового ордера в БД"""
+        try:
+            query = """
+                INSERT INTO limit_orders (symbol, order_id, price, quantity, status, grid_level, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            params = (
+                order.symbol,
+                order.order_id,
+                float(order.price),
+                float(order.quantity), 
+                order.status.value,
+                order.grid_level,
+                order.created_at.isoformat() if order.created_at else datetime.utcnow().isoformat()
+            )
+            
+            await db.execute_write(query, params)
+            
+            # Инвалидируем кэш
+            await self._invalidate_order_cache(order.order_id)
+            
+            logger.info(f"✅ Сохранен ордер {order.order_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения ордера {order.order_id}: {e}")
+            return False
+    
     async def _invalidate_order_cache(self, order_id: str):
         """Инвалидация кэша для ордера"""
         # Получаем символ ордера для очистки кэша списка ордеров
