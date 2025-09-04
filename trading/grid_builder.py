@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict
+from typing import List
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime
 
@@ -8,172 +8,163 @@ from config.constants import (
     MARTINGALE_MULTIPLIER,
     TAKE_PROFIT_PERCENT,
     LEVERAGE,
-    MARGIN_MODE,
     MARKET_ENTRY
 )
-from trading.models import OrderModel, OrderSide, OrderType, OrderStatus
+from trading.models import OrderModel, OrderSide, OrderType, OrderStatus, TradingConfig
 
-
-def calculate_grid_prices(current_price: Decimal, grid_levels: int, coverage_percent: float) -> List[Decimal]:
+def calculate_grid_prices(current_price: Decimal, config: TradingConfig) -> List[Decimal]:
     """
-    Рассчитывает цены для размещения грид-ордеров.
+    Рассчитывает цены для размещения грид-ордеров
     
     Args:
-        current_price (Decimal): Текущая цена актива.
-        grid_levels (int): Количество уровней в сетке.
-        coverage_percent (float): Процент покрытия вниз от текущей цены.
+        current_price: Текущая цена актива
+        config: Конфигурация торговли
         
     Returns:
-        List[Decimal]: Список цен для размещения ордеров (от текущей цены вниз).
+        List[Decimal]: Список цен для размещения ордеров
     """
-    prices: List[Decimal] = []
+    prices = []
     
-    # Рассчитываем минимальную цену (на 40% ниже текущей)
-    min_price: Decimal = current_price * Decimal(1 - coverage_percent)
+    # Минимальная цена (на coverage_percent ниже текущей)
+    min_price = current_price * (Decimal('1') - Decimal(str(config.coverage_percent)))
     
-    # Рассчитываем шаг между уровнями
-    price_range: Decimal = current_price - min_price
-    step: Decimal = price_range / Decimal(grid_levels - 1)
+    # Шаг между уровнями
+    price_range = current_price - min_price
+    step = price_range / Decimal(str(config.grid_levels - 1))
     
-    # Генерируем цены от текущей цены вниз
-    for i in range(grid_levels):
-        price: Decimal = current_price - (step * Decimal(i))
+    # Генерируем цены от текущей вниз
+    for i in range(config.grid_levels):
+        price = current_price - (step * Decimal(str(i)))
         prices.append(price.quantize(Decimal('0.00001'), rounding=ROUND_DOWN))
     
     return prices
 
-
 def calculate_martingale_quantities(
     base_quantity: Decimal, 
-    grid_levels: int, 
-    martingale_multiplier: float
+    config: TradingConfig
 ) -> List[Decimal]:
     """
-    Рассчитывает количества для ордеров с учётом мартингейла.
+    Рассчитывает количества для ордеров с мартингейлом
     
     Args:
-        base_quantity (Decimal): Базовое количество для первого ордера.
-        grid_levels (int): Количество уровней в сетке.
-        martingale_multiplier (float): Множитель мартингейла.
+        base_quantity: Базовое количество для первого ордера
+        config: Конфигурация торговли
         
     Returns:
-        List[Decimal]: Список количеств для каждого ордера.
+        List[Decimal]: Список количеств для каждого ордера
     """
-    quantities: List[Decimal] = []
+    quantities = []
+    multiplier = Decimal(str(config.martingale_multiplier))
     
-    for i in range(grid_levels):
-        # Первый ордер - базовое количество, остальные увеличиваются
+    for i in range(config.grid_levels):
         if i == 0:
             quantity = base_quantity
         else:
-            quantity = base_quantity * (Decimal(str(martingale_multiplier)) ** i)
+            quantity = base_quantity * (multiplier ** i)
         
         quantities.append(quantity.quantize(Decimal('0.00001'), rounding=ROUND_DOWN))
     
     return quantities
 
-
-def calculate_base_quantity(
+def calculate_optimal_base_quantity(
     deposit_amount: Decimal, 
     current_price: Decimal, 
-    leverage: int,
-    grid_levels: int,
-    martingale_multiplier: float
+    config: TradingConfig
 ) -> Decimal:
     """
-    Рассчитывает базовое количество для первого ордера с учётом всех уровней.
+    Рассчитывает оптимальное базовое количество с учетом всех уровней
     
     Args:
-        deposit_amount (Decimal): Размер депозита.
-        current_price (Decimal): Текущая цена актива.
-        leverage (int): Плечо.
-        grid_levels (int): Количество уровней в сетке.
-        martingale_multiplier (float): Множитель мартингейла.
+        deposit_amount: Размер депозита
+        current_price: Текущая цена актива
+        config: Конфигурация торговли
         
     Returns:
-        Decimal: Базовое количество для первого ордера.
+        Decimal: Оптимальное базовое количество
     """
-    # Доступная сумма с учётом плеча
-    available_amount: Decimal = deposit_amount * Decimal(leverage)
+    # Доступная сумма с плечом
+    available_amount = deposit_amount * Decimal(str(config.leverage))
     
-    # Рассчитываем общий множитель для всех ордеров
-    total_multiplier: Decimal = Decimal('0')
-    for i in range(grid_levels):
+    # Рассчитываем общий множитель всех ордеров
+    total_multiplier = Decimal('0')
+    multiplier = Decimal(str(config.martingale_multiplier))
+    
+    for i in range(config.grid_levels):
         if i == 0:
             total_multiplier += Decimal('1')
         else:
-            total_multiplier += Decimal(str(martingale_multiplier)) ** i
+            total_multiplier += multiplier ** i
     
     # Базовое количество = доступная_сумма / (общий_множитель * цена)
-    base_quantity: Decimal = available_amount / (total_multiplier * current_price)
+    base_quantity = available_amount / (total_multiplier * current_price)
     
     return base_quantity.quantize(Decimal('0.00001'), rounding=ROUND_DOWN)
-
 
 def build_grid(
     user_id: int,
     position_id: int,
     symbol: str,
     current_price: Decimal,
-    deposit_amount: Decimal
+    deposit_amount: Decimal,
+    config: TradingConfig = None
 ) -> List[OrderModel]:
     """
-    Строит сетку ордеров для грид-торговли.
+    Строит оптимизированную сетку ордеров для грид-торговли
     
     Args:
-        user_id (int): ID пользователя.
-        position_id (int): ID позиции.
-        symbol (str): Торговый символ.
-        current_price (Decimal): Текущая цена актива.
-        deposit_amount (Decimal): Размер депозита пользователя.
+        user_id: ID пользователя
+        position_id: ID позиции
+        symbol: Торговый символ
+        current_price: Текущая цена актива
+        deposit_amount: Размер депозита
+        config: Конфигурация торговли (опционально)
         
     Returns:
-        List[OrderModel]: Список ордеров для размещения.
+        List[OrderModel]: Список ордеров для размещения
     """
-    orders: List[OrderModel] = []
+    if config is None:
+        config = TradingConfig(
+            leverage=LEVERAGE,
+            grid_levels=GRID_LEVELS,
+            martingale_multiplier=MARTINGALE_MULTIPLIER,
+            coverage_percent=GRID_COVERAGE_PERCENT,
+            take_profit_percent=TAKE_PROFIT_PERCENT
+        )
+    
+    orders = []
     
     # Рассчитываем базовое количество
-    base_quantity: Decimal = calculate_base_quantity(
+    base_quantity = calculate_optimal_base_quantity(
         deposit_amount=deposit_amount,
         current_price=current_price,
-        leverage=LEVERAGE,
-        grid_levels=GRID_LEVELS,
-        martingale_multiplier=MARTINGALE_MULTIPLIER
+        config=config
     )
     
-    # Рассчитываем цены для размещения ордеров
-    grid_prices: List[Decimal] = calculate_grid_prices(
-        current_price=current_price,
-        grid_levels=GRID_LEVELS,
-        coverage_percent=GRID_COVERAGE_PERCENT
-    )
+    # Рассчитываем цены для грида
+    grid_prices = calculate_grid_prices(current_price, config)
     
-    # Рассчитываем количества с учётом мартингейла
-    quantities: List[Decimal] = calculate_martingale_quantities(
-        base_quantity=base_quantity,
-        grid_levels=GRID_LEVELS,
-        martingale_multiplier=MARTINGALE_MULTIPLIER
-    )
+    # Рассчитываем количества с мартингейлом
+    quantities = calculate_martingale_quantities(base_quantity, config)
     
-    # Создаём ордера
+    # Создаем ордера
     for i, (price, quantity) in enumerate(zip(grid_prices, quantities)):
-        # Первый ордер - рыночный (покупаем сразу по маркету)
+        # Первый ордер - рыночный при включенном MARKET_ENTRY
         if i == 0 and MARKET_ENTRY:
             order = OrderModel(
                 user_id=user_id,
                 position_id=position_id,
-                order_id=f"market_{symbol}_{user_id}_{position_id}",
+                order_id=f"market_{symbol}_{user_id}_{position_id}_{i}",
                 symbol=symbol,
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                price=current_price,  # Для рыночного ордера цена = текущая цена
+                price=current_price,
                 quantity=quantity,
                 status=OrderStatus.PENDING,
                 grid_level=i,
-                created_at=datetime.now()
+                created_at=datetime.utcnow()
             )
         else:
-            # Остальные ордера - лимитные
+            # Лимитные ордера
             order = OrderModel(
                 user_id=user_id,
                 position_id=position_id,
@@ -185,53 +176,54 @@ def build_grid(
                 quantity=quantity,
                 status=OrderStatus.PENDING,
                 grid_level=i,
-                created_at=datetime.now()
+                created_at=datetime.utcnow()
             )
         
         orders.append(order)
     
     return orders
 
-
-def calculate_take_profit_price(average_price: Decimal, take_profit_percent: float) -> Decimal:
+def calculate_take_profit_price(average_price: Decimal, config: TradingConfig) -> Decimal:
     """
-    Рассчитывает цену тейк-профита.
+    Рассчитывает цену тейк-профита
     
     Args:
-        average_price (Decimal): Средняя цена входа.
-        take_profit_percent (float): Процент тейк-профита.
+        average_price: Средняя цена входа
+        config: Конфигурация торговли
         
     Returns:
-        Decimal: Цена для тейк-профита.
+        Decimal: Цена для тейк-профита
     """
-    take_profit_price: Decimal = average_price * Decimal(1 + take_profit_percent)
+    tp_multiplier = Decimal('1') + Decimal(str(config.take_profit_percent))
+    take_profit_price = average_price * tp_multiplier
     return take_profit_price.quantize(Decimal('0.00001'), rounding=ROUND_DOWN)
-
 
 def create_take_profit_order(
     user_id: int,
     position_id: int,
     symbol: str,
     average_price: Decimal,
-    total_quantity: Decimal
+    total_quantity: Decimal,
+    config: TradingConfig = None
 ) -> OrderModel:
     """
-    Создаёт ордер тейк-профита.
+    Создает ордер тейк-профита
     
     Args:
-        user_id (int): ID пользователя.
-        position_id (int): ID позиции.
-        symbol (str): Торговый символ.
-        average_price (Decimal): Средняя цена входа.
-        total_quantity (Decimal): Общее количество для продажи.
+        user_id: ID пользователя
+        position_id: ID позиции
+        symbol: Торговый символ
+        average_price: Средняя цена входа
+        total_quantity: Общее количество для продажи
+        config: Конфигурация торговли
         
     Returns:
-        OrderModel: Ордер тейк-профита.
+        OrderModel: Ордер тейк-профита
     """
-    take_profit_price: Decimal = calculate_take_profit_price(
-        average_price=average_price,
-        take_profit_percent=TAKE_PROFIT_PERCENT
-    )
+    if config is None:
+        config = TradingConfig(take_profit_percent=TAKE_PROFIT_PERCENT)
+    
+    take_profit_price = calculate_take_profit_price(average_price, config)
     
     return OrderModel(
         user_id=user_id,
@@ -243,40 +235,91 @@ def create_take_profit_order(
         price=take_profit_price,
         quantity=total_quantity,
         status=OrderStatus.PENDING,
-        created_at=datetime.now()
+        created_at=datetime.utcnow()
     )
 
-
-def get_grid_summary(orders: List[OrderModel]) -> Dict[str, any]:
+def validate_grid_parameters(
+    current_price: Decimal,
+    deposit_amount: Decimal,
+    config: TradingConfig
+) -> bool:
     """
-    Возвращает сводку по созданной сетке ордеров.
+    Валидация параметров грида перед построением
     
     Args:
-        orders (List[OrderModel]): Список ордеров в сетке.
+        current_price: Текущая цена
+        deposit_amount: Размер депозита
+        config: Конфигурация торговли
         
     Returns:
-        dict[str, any]: Сводка с информацией о сетке.
+        bool: True если параметры валидны
+    """
+    try:
+        # Проверяем минимальные значения
+        if current_price <= 0:
+            return False
+        
+        if deposit_amount <= 0:
+            return False
+        
+        if config.grid_levels < 2:
+            return False
+        
+        if config.coverage_percent <= 0 or config.coverage_percent >= 1:
+            return False
+        
+        if config.leverage < 1:
+            return False
+        
+        # Проверяем что базовое количество будет больше 0
+        base_quantity = calculate_optimal_base_quantity(
+            deposit_amount, current_price, config
+        )
+        
+        if base_quantity <= 0:
+            return False
+        
+        return True
+        
+    except Exception:
+        return False
+
+def get_grid_statistics(orders: List[OrderModel]) -> dict:
+    """
+    Получение статистики по созданной сетке
+    
+    Args:
+        orders: Список ордеров в сетке
+        
+    Returns:
+        dict: Статистика грида
     """
     if not orders:
         return {}
     
-    total_quantity: Decimal = sum(order.quantity for order in orders)
-    total_value: Decimal = sum(order.price * order.quantity for order in orders)
+    total_quantity = sum(order.quantity for order in orders)
+    total_value = sum(order.price * order.quantity for order in orders)
     
-    prices: List[Decimal] = [order.price for order in orders]
-    min_price: Decimal = min(prices)
-    max_price: Decimal = max(prices)
+    prices = [order.price for order in orders]
+    min_price = min(prices)
+    max_price = max(prices)
+    
+    market_orders = [o for o in orders if o.order_type == OrderType.MARKET]
+    limit_orders = [o for o in orders if o.order_type == OrderType.LIMIT]
     
     return {
+        "symbol": orders[0].symbol,
         "total_orders": len(orders),
-        "total_quantity": total_quantity,
-        "total_value": total_value,
-        "average_price": total_value / total_quantity if total_quantity > 0 else Decimal('0'),
+        "market_orders_count": len(market_orders),
+        "limit_orders_count": len(limit_orders),
+        "total_quantity": float(total_quantity),
+        "total_value_usdt": float(total_value),
+        "average_price": float(total_value / total_quantity) if total_quantity > 0 else 0,
         "price_range": {
-            "min": min_price,
-            "max": max_price,
+            "min": float(min_price),
+            "max": float(max_price),
             "spread_percent": float((max_price - min_price) / max_price * 100)
         },
-        "market_orders": len([o for o in orders if o.order_type == OrderType.MARKET]),
-        "limit_orders": len([o for o in orders if o.order_type == OrderType.LIMIT])
+        "grid_levels": len(set(o.grid_level for o in orders if o.grid_level is not None)),
+        "created_at": orders[0].created_at.isoformat() if orders[0].created_at else None
     }

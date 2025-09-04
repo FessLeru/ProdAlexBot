@@ -1,259 +1,296 @@
 import asyncio
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime
-from fake_useragent import UserAgent
+import json
+from kafka import KafkaProducer
 
 from api.bitget_api import BitgetAPI
 from database.repositories.limit_order_repo import LimitOrderRepository
 from database.repositories.take_profit_repo import TakeProfitRepository
-from config.constants import COINS, CHECK_DELAY, LEVERAGE, MARGIN_MODE
+from config.constants import LEVERAGE, MARGIN_MODE, CHECK_DELAY, TAKE_PROFIT_PERCENT
+from config.settings import settings
 from trading.grid_builder import build_grid
+from trading.models import OrderModel, OrderStatusUpdate, OrderStatus, KafkaOrderMessage
 
 logger = logging.getLogger(__name__)
 
-class OrderTracker:
+class OrderTracker: 
     def __init__(self, api_key: str, api_secret: str, api_passphrase: str):
-        # Инициализируем API с fake user agent
-        ua = UserAgent()
-        self.api = BitgetAPI(api_key, api_secret, api_passphrase)
-        self.api.exchange.headers['User-Agent'] = ua.random
+        """
+        Инициализация трекера
+        
+        Args:
+            api_key: API ключ
+            api_secret: API секрет  
+            api_passphrase: API пароль
+        """
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.api_passphrase = api_passphrase
         
         self.limit_repo = LimitOrderRepository()
         self.tp_repo = TakeProfitRepository()
+        
+        # Kafka producer для уведомлений
+        self.kafka_producer = KafkaProducer(
+            bootstrap_servers=[settings.KAFKA_BOOTSTRAP_SERVERS],
+            value_serializer=lambda x: json.dumps(x, default=str).encode('utf-8')
+        )
 
-        self.is_grid_open = False
-
-    async def open_grid(self, symbol: str, user_id: int, position_id: int, deposit_amount: Decimal):
-        """Открытие грид-сетки ордеров"""
+    async def start_trading_for_symbol(self, symbol: str, deposit_amount: Decimal = Decimal('100')) -> bool:
+        """
+        Запуск торговли для конкретного символа
+        
+        Args:
+            symbol: Торговый символ
+            deposit_amount: Размер депозита в USDT
+            
+        Returns:
+            bool: True если успешно запущена торговля
+        """
         try:
-            # 1. Устанавливаем плечо и режим маржи
-            await self.api.set_leverage(symbol, LEVERAGE)
-            await self.api.set_margin_mode(symbol, MARGIN_MODE)
+            logger.info(f"🚀 Запуск торговли для {symbol}")
+            
+            # 1. Инициализируем API и устанавливаем настройки
+            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            
+            # Устанавливаем плечо и режим маржи
+            leverage_ok = await api.set_leverage(symbol, LEVERAGE)
+            margin_ok = await api.set_margin_mode(symbol, MARGIN_MODE)
+            
+            if not leverage_ok or not margin_ok:
+                logger.error(f"❌ Не удалось установить настройки для {symbol}")
+                return False
             
             # 2. Получаем текущую цену
-            current_price = await self.api.get_ticker_price(symbol)
+            current_price = await api.get_ticker_price(symbol)
             if not current_price:
                 logger.error(f"❌ Не удалось получить цену {symbol}")
                 return False
             
             # 3. Строим сетку ордеров
-            orders = build_grid(user_id, position_id, symbol, current_price, deposit_amount)
+            orders = build_grid(
+                user_id=1,  # Пока хардкод, потом можно параметризовать
+                position_id=1,
+                symbol=symbol,
+                current_price=current_price,
+                deposit_amount=deposit_amount
+            )
             
             # 4. Размещаем ордера на бирже
+            placed_orders = []
             for order in orders:
                 if order.order_type.value == "market":
-                    # Рыночный ордер
-                    result = await self.api.create_market_order(symbol, order.side, order.quantity)
+                    # Рыночный ордер - используем номинал в USDT
+                    notional_usdt = float(order.quantity * order.price)
+                    result = await api.create_market_order(symbol, order.side, notional_usdt)
                 else:
-                    # Лимитный ордер  
-                    result = await self.api.create_limit_order(symbol, order.side, order.quantity, order.price)
+                    # Лимитный ордер
+                    result = await api.create_limit_order(symbol, order.side, order.quantity, order.price)
                 
                 if result:
-                    # Сохраняем в БД с реальным ID от биржи
-                    order.order_id = result['id']
-                    await self.limit_repo.save_order(order)
-                
-                await asyncio.sleep(0.1)  # Пауза между ордерами
-            
-            logger.info(f"✅ Открыта грид-сетка для {symbol}: {len(orders)} ордеров")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка открытия сетки {symbol}: {e}")
-            return False
-
-    async def close_grid(self, symbol: str):
-        """Закрытие грид-сетки: отмена всех лимитных ордеров"""
-        try:
-            # 1. Получаем активные лимитные ордера из БД
-            order_ids = await self.limit_repo.get_orders_ids(symbol)
-            
-            if not order_ids:
-                logger.info(f"Нет активных ордеров для закрытия {symbol}")
-                return True
-            
-            cancelled_count = 0
-            
-            # 2. Отменяем каждый ордер на бирже
-            for order_id in order_ids:
-                success = await self.api.cancel_order(order_id, symbol)
-                if success:
-                    # 3. Обновляем статус в БД
-                    await self.limit_repo.update_order_status(order_id, 'cancelled')
-                    cancelled_count += 1
-                
-                await asyncio.sleep(0.1)  # Пауза между отменами
-            
-            logger.info(f"✅ Закрыта грид-сетка {symbol}: отменено {cancelled_count}/{len(order_ids)} ордеров")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка закрытия сетки {symbol}: {e}")
-            return False
-    
-    async def track_symbol(self, symbol: str):
-        """Основная функция отслеживания символа"""
-        if self.is_grid_open:
-            return
-        
-        logger.info(f"🎯 Начинаем отслеживание {symbol}")
-
-        while True:
-            try:
-                if not self.is_grid_open:
-                    await self.open_grid(symbol)
-
-                # 1. Проверяем тейк-профит
-                tp_order = await self.tp_repo.get_take_profit(symbol)
-                
-                if tp_order:
-                    tp_status = await self._check_take_profit_status(symbol, tp_order['order_id'])
+                    # Обновляем ID ордера с биржи
+                    order.order_id = result.order_id
+                    order.user_id = result.user_id
+                    order.position_id = result.position_id
                     
-                    if tp_status == 'filled':
-                        logger.info(f"✅ Тейк-профит исполнен для {symbol}, ожидание 60 сек")
-                        await self.tp_repo.mark_take_profit_filled(tp_order['order_id'])
-                        await self.close_grid(symbol)
-                        self.is_grid_open = False
-                        await asyncio.sleep(60)  # Ожидание для новых участников
-                        continue
+                    # Сохраняем в БД
+                    await self.limit_repo.save_order(order)
+                    placed_orders.append(order)
+                    
+                    # Отправляем уведомление в Kafka
+                    await self._send_order_notification(order)
+                    
+                    logger.info(f"✅ Размещен ордер {order.order_id} {order.side.value} {symbol}")
                 
-                # 2. Получаем лимитные ордера
-                limit_order_ids = await self.limit_repo.get_orders_ids(symbol)
-                
-                if not limit_order_ids:
-                    logger.debug(f"Нет активных ордеров для {symbol}")
-                    await asyncio.sleep(CHECK_DELAY)
-                    continue
-                
-                # 3. Проверяем ордера последовательно
-                filled_orders, should_recalculate = await self._check_limit_orders(symbol, limit_order_ids)
-                
-                # 4. Пересчитываем тейк-профит если нужно
-                if should_recalculate and filled_orders:
-                    await self._recalculate_take_profit(symbol, filled_orders)
-                
-                await asyncio.sleep(CHECK_DELAY)
-                
-            except Exception as e:
-                logger.error(f"❌ Ошибка отслеживания {symbol}: {e}")
-                await asyncio.sleep(CHECK_DELAY * 2)  # Увеличенная пауза при ошибке
-    
-    async def _check_take_profit_status(self, symbol: str, tp_order_id: str) -> str:
-        """Проверка статуса тейк-профита"""
-        try:
-            order_info = await self.api.fetch_order(tp_order_id, symbol)
-            if order_info:
-                return order_info.get('status', 'unknown')
-            return 'unknown'
-        except Exception as e:
-            logger.error(f"❌ Ошибка проверки тейк-профита {tp_order_id}: {e}")
-            return 'unknown'
-    
-    async def _check_limit_orders(self, symbol: str, order_ids: List[str]) -> Tuple[List[Dict], bool]:
-        """Проверка лимитных ордеров"""
-        filled_orders = []
-        should_recalculate = False
-        batch_updates = []
-        
-        for order_id in order_ids:
-            # Пропускаем уже исполненные ордера из кэша
-            cached_status = await self.limit_repo.get_order_status(order_id)
-            if cached_status == 'filled':
-                continue
+                # Небольшая задержка между ордерами
+                await asyncio.sleep(0.1)
             
-            # Проверяем статус на бирже
-            try:
-                order_info = await self.api.fetch_order(order_id, symbol)
+            logger.info(f"✅ Сетка открыта для {symbol}: {len(placed_orders)}/{len(orders)} ордеров")
+            return len(placed_orders) > 0
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка запуска торговли {symbol}: {e}")
+            return False
+
+    async def track_symbol_orders(self, symbol: str) -> Optional[str]:
+        """
+        Отслеживание ордеров для символа
+        
+        Args:
+            symbol: Торговый символ
+            
+        Returns:
+            Optional[str]: 'restart' если нужен перезапуск, None если продолжаем
+        """
+        try:
+            # 1. Проверяем тейк-профит
+            tp_result = await self._check_take_profit(symbol)
+            if tp_result == 'filled':
+                logger.info(f"🎯 Тейк-профит исполнен для {symbol} - требуется перезапуск")
+                return 'restart'
+            
+            # 2. Получаем активные лимитные ордера  
+            active_order_ids = await self.limit_repo.get_active_orders_ids(symbol)
+            
+            if not active_order_ids:
+                logger.debug(f"Нет активных ордеров для {symbol}")
+                return None
+            
+            # 3. Проверяем ордера последовательно (оптимизация)
+            updates, should_update_tp = await self._check_limit_orders_optimized(symbol, active_order_ids)
+            
+            # 4. Применяем обновления батчом
+            if updates:
+                await self.limit_repo.batch_update_order_statuses(updates)
+            
+            # 5. Обновляем тейк-профит если нужно
+            if should_update_tp:
+                await self._update_take_profit(symbol)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка отслеживания {symbol}: {e}")
+            return None
+
+    async def _check_take_profit(self, symbol: str) -> Optional[str]:
+        """
+        Проверка статуса тейк-профита
+        
+        Args:
+            symbol: Торговый символ
+            
+        Returns:
+            Optional[str]: Статус тейк-профита
+        """
+        try:
+            tp_order = await self.tp_repo.get_active_take_profit(symbol)
+            if not tp_order:
+                return None
+            
+            # Создаем API соединение для проверки
+            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            order_info = await api.fetch_order(tp_order.order_id, symbol)
+            
+            if order_info:
+                status = order_info.get('status', 'unknown')
+                
+                if status in ['closed', 'filled']:
+                    # Тейк-профит исполнен
+                    await self.tp_repo.mark_filled(tp_order.order_id)
+                    
+                    # Отменяем все оставшиеся ордера
+                    await self._cancel_remaining_orders(symbol)
+                    
+                    return 'filled'
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка проверки тейк-профита {symbol}: {e}")
+            return None
+
+    async def _check_limit_orders_optimized(self, symbol: str, order_ids: List[str]) -> Tuple[List[OrderStatusUpdate], bool]:
+        """
+        Оптимизированная проверка лимитных ордеров
+        
+        Args:
+            symbol: Торговый символ
+            order_ids: Список ID ордеров
+            
+        Returns:
+            Tuple[List[OrderStatusUpdate], bool]: Список обновлений и флаг обновления ТП
+        """
+        updates = []
+        should_update_tp = False
+        
+        api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+        
+        try:
+            for order_id in order_ids:
+                # Проверяем кэш статуса
+                cached_status = await self.limit_repo.get_order_status_cached(order_id)
+                if cached_status == 'filled':
+                    continue  # Пропускаем уже исполненные
+                
+                # Проверяем на бирже
+                order_info = await api.fetch_order(order_id, symbol)
                 if not order_info:
                     continue
                 
                 status = order_info.get('status', 'unknown')
-                filled_qty = Decimal(str(order_info.get('filled', 0)))
+                filled_qty = order_info.get('filled', 0)
                 
                 if status == 'open':
-                    # Ордер не исполнен - прекращаем проверку
+                    # Ордер не исполнен - останавливаем проверку (оптимизация)
                     break
                     
-                elif status in ['partial-filled', 'filled']:
-                    # Ордер исполнен частично или полностью
-                    filled_orders.append({
-                        'order_id': order_id,
-                        'price': Decimal(str(order_info.get('price', 0))),
-                        'filled_quantity': filled_qty,
-                        'status': 'filled' if status == 'filled' else 'partial_filled'
-                    })
+                elif status in ['closed', 'filled', 'partial-filled']:
+                    # Ордер исполнен
+                    update = OrderStatusUpdate(
+                        order_id=order_id,
+                        status=OrderStatus.FILLED if status in ['closed', 'filled'] else OrderStatus.PARTIAL_FILLED,
+                        filled_quantity=Decimal(str(filled_qty)) if filled_qty else None,
+                        filled_at=datetime.utcnow()
+                    )
                     
-                    # Подготавливаем для batch update
-                    batch_updates.append((
-                        'filled' if status == 'filled' else 'partial_filled',
-                        float(filled_qty),
-                        datetime.utcnow().isoformat(),
-                        order_id
-                    ))
+                    updates.append(update)
+                    should_update_tp = True
                     
-                    should_recalculate = True
-                    
-                    # Если частично исполнен - тоже прекращаем проверку
+                    # Если частично исполнен - тоже останавливаем проверку
                     if status == 'partial-filled':
                         break
                 
                 # Небольшая задержка между запросами
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 
-            except Exception as e:
-                logger.error(f"❌ Ошибка проверки ордера {order_id}: {e}")
-                break
+        except Exception as e:
+            logger.error(f"❌ Ошибка проверки ордеров {symbol}: {e}")
         
-        # Батчевое обновление БД
-        if batch_updates:
-            await self.limit_repo.batch_update_filled_orders(batch_updates)
+        return updates, should_update_tp
+
+    async def _update_take_profit(self, symbol: str):
+        """
+        Обновление тейк-профита на основе исполненных ордеров
         
-        return filled_orders, should_recalculate
-    
-    async def _recalculate_take_profit(self, symbol: str, new_filled_orders: List[Dict]):
-        """Пересчет и обновление тейк-профита"""
+        Args:
+            symbol: Торговый символ
+        """
         try:
-            # Получаем все исполненные ордера
-            all_filled = await self.limit_repo.get_filled_orders_for_symbol(symbol)
+            # Получаем сводку по исполненным ордерам
+            summary = await self.limit_repo.get_filled_orders_summary(symbol)
             
-            if not all_filled:
+            if summary['total_quantity'] == 0:
                 return
             
-            # Рассчитываем среднюю цену и общий объем
-            total_quantity = Decimal('0')
-            weighted_sum = Decimal('0')
+            # Рассчитываем цену тейк-профита
+            avg_price = summary['weighted_price']
+            tp_price = avg_price * Decimal(str(1 + TAKE_PROFIT_PERCENT))
+            total_quantity = summary['total_quantity']
             
-            for order in all_filled:
-                quantity = order['quantity']
-                price = order['price']
-                total_quantity += quantity
-                weighted_sum += price * quantity
-            
-            if total_quantity == 0:
-                return
-            
-            avg_price = weighted_sum / total_quantity
-            tp_price = avg_price * Decimal('1.02')  # +2%
-            
-            # Отменяем старый тейк-профит на бирже
-            current_tp = await self.tp_repo.get_take_profit(symbol)
+            # Отменяем старый тейк-профит
+            current_tp = await self.tp_repo.get_active_take_profit(symbol)
             if current_tp:
-                await self.api.cancel_order(current_tp['order_id'], symbol)
+                api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+                await api.cancel_order(current_tp.order_id, symbol)
             
-            # Создаем новый тейк-профит
-            tp_order = await self.api.create_limit_order(
+            # Создаем новый тейк-профит на бирже
+            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            tp_order = await api.create_limit_order(
                 symbol=symbol,
-                side='sell',  # Закрываем лонг позицию
+                side=OrderSide.SELL,
                 amount=total_quantity,
                 price=tp_price
             )
             
             if tp_order:
-                await self.tp_repo.update_take_profit(
+                # Сохраняем в БД
+                await self.tp_repo.create_take_profit(
                     symbol=symbol,
-                    order_id=tp_order['id'],
+                    order_id=tp_order.order_id,
                     price=tp_price,
                     quantity=total_quantity
                 )
@@ -261,4 +298,65 @@ class OrderTracker:
                 logger.info(f"🎯 Обновлен тейк-профит {symbol}: {tp_price} x {total_quantity}")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка пересчета тейк-профита {symbol}: {e}")
+            logger.error(f"❌ Ошибка обновления тейк-профита {symbol}: {e}")
+
+    async def _cancel_remaining_orders(self, symbol: str):
+        """
+        Отмена всех оставшихся ордеров после исполнения тейк-профита
+        
+        Args:
+            symbol: Торговый символ
+        """
+        try:
+            active_orders = await self.limit_repo.get_active_orders_ids(symbol)
+            
+            if not active_orders:
+                return
+            
+            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            updates = []
+            
+            for order_id in active_orders:
+                success = await api.cancel_order(order_id, symbol)
+                if success:
+                    updates.append(OrderStatusUpdate(
+                        order_id=order_id,
+                        status=OrderStatus.CANCELLED
+                    ))
+                
+                await asyncio.sleep(0.05)
+            
+            # Батчевое обновление статусов
+            if updates:
+                await self.limit_repo.batch_update_order_statuses(updates)
+            
+            logger.info(f"✅ Отменено {len(updates)} ордеров для {symbol}")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка отмены ордеров {symbol}: {e}")
+
+    async def _send_order_notification(self, order: OrderModel):
+        """
+        Отправка уведомления в Kafka о создании ордера
+        
+        Args:
+            order: Модель ордера
+        """
+        try:
+            message = KafkaOrderMessage(
+                symbol=order.symbol,
+                order_id=order.order_id,
+                side=order.side,
+                order_type=order.order_type,
+                price=order.price,
+                quantity=order.quantity,
+                user_id=order.user_id
+            )
+            
+            self.kafka_producer.send(
+                settings.KAFKA_ORDERS_TOPIC,
+                value=message.dict()
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки уведомления для {order.order_id}: {e}")

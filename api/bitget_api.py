@@ -3,61 +3,86 @@ import asyncio
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 import logging
+from fake_useragent import UserAgent
 
 from utils.rate_limiter import RateLimiter
-from trading.models import OrderSide, OrderType
+from trading.models import OrderSide, OrderType, OrderModel
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-class BitgetAPI:    
+class BitgetAPI:
+    """
+    Оптимизированный API клиент для Bitget с поддержкой ccxt 4.5.3
+    """
+    
     def __init__(self, api_key: str, api_secret: str, api_passphrase: str):
+        """
+        Инициализация API клиента
+        
+        Args:
+            api_key: API ключ
+            api_secret: API секрет  
+            api_passphrase: API пароль
+        """
+        ua = UserAgent()
+        
         self.exchange = ccxt.bitget({
             'apiKey': api_key,
             'secret': api_secret,
             'password': api_passphrase,
             'sandbox': False,
             'enableRateLimit': True,
-            'rateLimit': 100,  # мс между запросами
+            'rateLimit': 300,
+            'timeout': 30000,
             'options': {
-                'defaultType': 'swap',  # для фьючерсов
+                'defaultType': 'swap',
+                'fetchCurrencies': False,
+            },
+            'headers': {
+                'User-Agent': ua.random
             }
         })
         
+        # Уменьшенный rate limit из-за fake user agent
         self.rate_limiter = RateLimiter(
-            max_requests=settings.MAX_REQUESTS_PER_MINUTE,
-            window=settings.RATE_LIMIT_WINDOW
+            max_requests=100,
+            window=60,
+            max_concurrent=5
         )
-        
-        self._session_active = False
-
-    async def __aenter__(self):
-        """Асинхронный контекст-менеджер"""
-        self._session_active = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Закрытие сессии"""
-        await self.close()
 
     async def close(self):
-        """Закрытие соединения"""
-        if self._session_active:
+        """Явное закрытие соединения"""
+        try:
             await self.exchange.close()
-            self._session_active = False
+        except Exception as e:
+            logger.error(f"Ошибка закрытия соединения: {e}")
 
     async def test_connection(self) -> bool:
-        """Тестирование подключения и API ключей"""
+        """
+        Тестирование подключения и API ключей
+        
+        Returns:
+            bool: True если подключение успешно
+        """
         try:
             await self.rate_limiter.acquire("test_connection")
+            await self.exchange.load_markets(reload=True, params={"type": "swap"})
             balance = await self.exchange.fetch_balance()
             return True
         except Exception as e:
             logger.error(f"❌ Ошибка тестирования подключения: {e}")
             return False
+        finally:
+            await self.close()
 
     async def get_account_balance(self) -> Optional[Dict]:
-        """Получение баланса аккаунта"""
+        """
+        Получение баланса аккаунта
+        
+        Returns:
+            Optional[Dict]: Баланс или None при ошибке
+        """
         try:
             await self.rate_limiter.acquire("balance")
             balance = await self.exchange.fetch_balance()
@@ -65,168 +90,269 @@ class BitgetAPI:
         except Exception as e:
             logger.error(f"❌ Ошибка получения баланса: {e}")
             return None
+        finally:
+            await self.close()
 
     async def get_ticker_price(self, symbol: str) -> Optional[Decimal]:
-        """Получение текущей цены тикера"""
+        """
+        Получение текущей цены тикера
+        
+        Args:
+            symbol: Торговый символ
+            
+        Returns:
+            Optional[Decimal]: Цена или None при ошибке
+        """
         try:
             await self.rate_limiter.acquire(f"ticker_{symbol}")
             ticker = await self.exchange.fetch_ticker(symbol)
-            return Decimal(str(ticker['last']))
+            price = ticker.get('last') or ticker.get('close')
+            if price:
+                return Decimal(str(price))
+            return None
         except Exception as e:
             logger.error(f"❌ Ошибка получения цены {symbol}: {e}")
             return None
+        finally:
+            await self.close()
 
-    async def create_market_order(self, symbol: str, side: OrderSide, amount: Decimal, margin_coin: str = "USDT") -> Optional[Dict]:
-        """Создание маркет-ордера для фьючерсов"""
+    async def get_size_from_notional(self, symbol: str, notional_usdt: float) -> Optional[float]:
+        """
+        Расчет размера позиции из номинала в USDT
+        
+        Args:
+            symbol: Торговый символ
+            notional_usdt: Номинал в USDT
+            
+        Returns:
+            Optional[float]: Размер позиции или None при ошибке
+        """
         try:
-            await self.rate_limiter.acquire(f"create_order_{symbol}")
+            ticker = await self.exchange.fetch_ticker(symbol)
+            last = ticker.get("last") or ticker.get("close")
+            if not last:
+                return None
+
+            market = self.exchange.market(symbol)
+            contract_size = market.get("contractSize", 1)
+
+            raw_size = Decimal(str(notional_usdt)) / (Decimal(str(last)) * Decimal(str(contract_size)))
+            raw_size = raw_size.quantize(Decimal("1.00000000"))
+            return float(self.exchange.amount_to_precision(symbol, float(raw_size)))
+        except Exception as e:
+            logger.error(f"❌ Ошибка расчета размера для {symbol}: {e}")
+            return None
+
+    async def create_market_order(self, symbol: str, side: OrderSide, notional_usdt: float) -> Optional[OrderModel]:
+        """
+        Создание маркет-ордера по номиналу в USDT
+        
+        Args:
+            symbol: Торговый символ
+            side: Сторона ордера
+            notional_usdt: Номинал в USDT
+            
+        Returns:
+            Optional[OrderModel]: Модель ордера или None при ошибке
+        """
+        try:
+            await self.rate_limiter.acquire(f"create_market_{symbol}")
+            
+            # Загружаем рынки если нужно
+            if not self.exchange.markets:
+                await self.exchange.load_markets(reload=True, params={"type": "swap"})
+            
+            # Рассчитываем размер
+            size = await self.get_size_from_notional(symbol, notional_usdt)
+            if not size:
+                return None
             
             params = {
-                'marginCoin': margin_coin,
                 'marginMode': 'cross',
-                'productType': 'USDT-FUTURES'  # Явно указываем тип продукта
+                'marginCoin': 'USDT',
+                'timeInForceValue': 'normal',
             }
             
             order = await self.exchange.create_market_order(
                 symbol=symbol,
                 side=side.value,
-                amount=float(amount),
+                amount=size,
                 params=params
             )
             
-            logger.info(f"✅ Создан маркет-ордер {order['id']} {side.value} {amount} {symbol}")
-            return order
+            # Получаем текущую цену для модели
+            current_price = await self.get_ticker_price(symbol)
+            
+            order_model = OrderModel(
+                user_id=0,  # Будет заполнено в вызывающем коде
+                position_id=0,  # Будет заполнено в вызывающем коде
+                order_id=order['id'],
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.MARKET,
+                price=current_price or Decimal('0'),
+                quantity=Decimal(str(size)),
+                status=OrderStatus.PENDING
+            )
+            
+            logger.info(f"✅ Создан маркет-ордер {order['id']} {side.value} {size} {symbol}")
+            return order_model
             
         except Exception as e:
             logger.error(f"❌ Ошибка создания маркет-ордера {symbol}: {e}")
             return None
+        finally:
+            await self.close()
 
-    async def create_limit_order(self, symbol: str, side: OrderSide, amount: Decimal, price: Decimal) -> Optional[Dict]:
-        """Создание лимит-ордера"""
+    async def create_limit_order(self, symbol: str, side: OrderSide, amount: Decimal, price: Decimal) -> Optional[OrderModel]:
+        """
+        Создание лимит-ордера
+        
+        Args:
+            symbol: Торговый символ
+            side: Сторона ордера
+            amount: Количество
+            price: Цена
+            
+        Returns:
+            Optional[OrderModel]: Модель ордера или None при ошибке
+        """
         try:
-            await self.rate_limiter.acquire(f"create_order_{symbol}")
+            await self.rate_limiter.acquire(f"create_limit_{symbol}")
+            
+            params = {
+                'marginMode': 'cross',
+                'marginCoin': 'USDT',
+                'timeInForceValue': 'normal',
+            }
+            
             order = await self.exchange.create_limit_order(
                 symbol=symbol,
                 side=side.value,
                 amount=float(amount),
                 price=float(price),
-                params={
-                    'marginCoin': 'USDT',
-                    'marginMode': 'cross'
-                }
+                params=params
+            )
+            
+            order_model = OrderModel(
+                user_id=0,  # Будет заполнено в вызывающем коде
+                position_id=0,  # Будет заполнено в вызывающем коде
+                order_id=order['id'],
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.LIMIT,
+                price=price,
+                quantity=amount,
+                status=OrderStatus.PENDING
             )
             
             logger.info(f"✅ Создан лимит-ордер {order['id']} {side.value} {amount} {symbol} @ {price}")
-            return order
+            return order_model
             
         except Exception as e:
             logger.error(f"❌ Ошибка создания лимит-ордера {symbol}: {e}")
             return None
+        finally:
+            await self.close()
 
     async def cancel_order(self, order_id: str, symbol: str) -> bool:
-        """Отмена ордера"""
-        try:
-            await self.rate_limiter.acquire(f"cancel_order_{symbol}")
+        """
+        Отмена ордера
+        
+        Args:
+            order_id: ID ордера
+            symbol: Торговый символ
             
-            result = await self.exchange.cancel_order(order_id, symbol)
+        Returns:
+            bool: True если успешно отменен
+        """
+        try:
+            await self.rate_limiter.acquire(f"cancel_{symbol}")
+            await self.exchange.cancel_order(order_id, symbol)
             logger.info(f"✅ Отменен ордер {order_id}")
             return True
-            
         except Exception as e:
             logger.error(f"❌ Ошибка отмены ордера {order_id}: {e}")
             return False
+        finally:
+            await self.close()
 
     async def fetch_order(self, order_id: str, symbol: str) -> Optional[Dict]:
-        """Получение информации об ордере"""
-        try:
-            await self.rate_limiter.acquire(f"fetch_order_{symbol}")
+        """
+        Получение информации об ордере
+        
+        Args:
+            order_id: ID ордера
+            symbol: Торговый символ
             
+        Returns:
+            Optional[Dict]: Информация об ордере или None при ошибке
+        """
+        try:
+            await self.rate_limiter.acquire(f"fetch_{symbol}")
             order = await self.exchange.fetch_order(order_id, symbol)
             return order
-            
         except Exception as e:
             logger.error(f"❌ Ошибка получения ордера {order_id}: {e}")
             return None
+        finally:
+            await self.close()
 
-    async def fetch_orders_batch(self, symbol: str, order_ids: List[str]) -> Dict[str, Dict]:
-        """Батчевое получение ордеров (если поддерживается API)"""
-        results = {}
+    async def set_leverage(self, symbol: str, leverage: int) -> bool:
+        """
+        Установка плеча
         
-        # Bitget может не поддерживать batch запросы, делаем последовательно
-        for order_id in order_ids:
-            order_info = await self.fetch_order(order_id, symbol)
-            if order_info:
-                results[order_id] = order_info
+        Args:
+            symbol: Торговый символ
+            leverage: Размер плеча
             
-            # Небольшая задержка между запросами
-            await asyncio.sleep(0.05)
-        
-        return results
-
-    async def get_open_positions(self) -> List[Dict]:
-        """Получение открытых позиций"""
-        try:
-            await self.rate_limiter.acquire("positions")
-            
-            positions = await self.exchange.fetch_positions()
-            # Фильтруем только открытые позиции
-            open_positions = [pos for pos in positions if pos['size'] != 0]
-            
-            return open_positions
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения позиций: {e}")
-            return []
-
-    async def set_leverage(self, symbol: str, leverage: int, margin_coin: str = "USDT") -> bool:
-        """Установка плеча"""
+        Returns:
+            bool: True если успешно установлено
+        """
         try:
             await self.rate_limiter.acquire(f"leverage_{symbol}")
-            
-            params = {
-                'marginCoin': margin_coin
-            }
-            
+            params = {'marginCoin': 'USDT'}
             await self.exchange.set_leverage(leverage, symbol, params=params)
             logger.info(f"✅ Установлено плечо {leverage}x для {symbol}")
             return True
-            
         except Exception as e:
             logger.error(f"❌ Ошибка установки плеча для {symbol}: {e}")
             return False
+        finally:
+            await self.close()
 
-    async def set_margin_mode(self, symbol: str, margin_mode: str = "cross", margin_coin: str = "USDT") -> bool:
-        """Установка режима маржи"""
-        try:
-            await self.rate_limiter.acquire(f"margin_mode_{symbol}")
+    async def set_margin_mode(self, symbol: str, margin_mode: str = "cross") -> bool:
+        """
+        Установка режима маржи
+        
+        Args:
+            symbol: Торговый символ
+            margin_mode: Режим маржи
             
-            # Специфичный для Bitget запрос с marginCoin
+        Returns:
+            bool: True если успешно установлен
+        """
+        try:
+            await self.rate_limiter.acquire(f"margin_{symbol}")
             params = {
                 'symbol': symbol,
                 'marginMode': margin_mode,
-                'marginCoin': margin_coin
+                'marginCoin': 'USDT'
             }
-            
             await self.exchange.set_margin_mode(margin_mode, symbol, params=params)
             logger.info(f"✅ Установлен режим маржи {margin_mode} для {symbol}")
             return True
-            
         except Exception as e:
             logger.error(f"❌ Ошибка установки режима маржи для {symbol}: {e}")
             return False
-
-    async def get_order_history(self, symbol: str, limit: int = 100) -> List[Dict]:
-        """Получение истории ордеров"""
-        try:
-            await self.rate_limiter.acquire(f"history_{symbol}")
-            
-            orders = await self.exchange.fetch_orders(symbol, limit=limit)
-            return orders
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения истории ордеров {symbol}: {e}")
-            return []
+        finally:
+            await self.close()
 
     def get_api_stats(self) -> Dict:
-        """Получение статистики использования API"""
+        """
+        Получение статистики использования API
+        
+        Returns:
+            Dict: Статистика rate limiter
+        """
         return self.rate_limiter.get_stats()
