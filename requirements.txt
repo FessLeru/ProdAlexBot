@@ -26,3 +26,6 @@ loguru
 pandas
 openpyxl
 
+# Kafka
+aiokafka
+
