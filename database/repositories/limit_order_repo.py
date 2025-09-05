@@ -7,7 +7,7 @@ from datetime import datetime
 
 from database.connection import db
 from config.settings import settings
-from trading.models import OrderModel, OrderStatus, OrderStatusUpdate
+from trading.models import OrderModel, OrderStatusUpdate
 
 logger = logging.getLogger(__name__)
 

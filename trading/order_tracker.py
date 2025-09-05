@@ -12,7 +12,7 @@ from database.repositories.take_profit_repo import TakeProfitRepository
 from config.constants import LEVERAGE, MARGIN_MODE, CHECK_DELAY, TAKE_PROFIT_PERCENT
 from config.settings import settings
 from trading.grid_builder import build_grid
-from trading.models import OrderModel, OrderStatusUpdate, OrderStatus, KafkaOrderMessage
+from trading.models import OrderModel, OrderStatusUpdate, OrderStatus, KafkaOrderMessage, OrderSide
 
 logger = logging.getLogger(__name__)
 

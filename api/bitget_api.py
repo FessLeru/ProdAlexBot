@@ -6,7 +6,7 @@ import logging
 from fake_useragent import UserAgent
 
 from utils.rate_limiter import RateLimiter
-from trading.models import OrderSide, OrderType, OrderModel
+from trading.models import OrderSide, OrderType, OrderModel, OrderStatus
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
