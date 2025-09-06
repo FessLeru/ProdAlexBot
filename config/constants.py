@@ -11,15 +11,16 @@ CHECK_DELAY: float = 2.0  # Секунды между проверками ор�
 RESTART_DELAY: int = 60  # Секунды перед перезапуском после тейк-профита
 
 # Список монет в формате ccxt 4.5.3
+# Список монет в формате ccxt 4.5.3 (USDT-M перпетуалы на Bitget)
 COINS = [
-    "BTC/USDT:USDT",
-    "ETH/USDT:USDT", 
-    "BNB/USDT:USDT",
-    "ADA/USDT:USDT",
-    "SOL/USDT:USDT",
-    "MATIC/USDT:USDT",
-    "DOT/USDT:USDT",
-    "AVAX/USDT:USDT",
-    "LINK/USDT:USDT",
-    "UNI/USDT:USDT"
+    "JASMY/USDT:USDT",
+    "GRT/USDT:USDT",
+    "GALA/USDT:USDT",
+    "WLD/USDT:USDT",
+    "CRV/USDT:USDT",
+    # "ARB/USDT:USDT",
+    # "OP/USDT:USDT",
+    # "APT/USDT:USDT",
+    # "APE/USDT:USDT",
+    # "FLOKI/USDT:USDT"
 ]

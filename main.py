@@ -27,7 +27,7 @@ def start_trading() -> None:
     logger.info("🎯 Запуск торговых задач")
     
     # Рассчитываем депозит на монету (примерный расчет)
-    deposit_per_coin = 100.0  # USDT на каждую монету
+    deposit_per_coin = 10.0  # USDT на каждую монету
     
     start_master_trading.delay(
         api_key=settings.TRADER_API_KEY,
