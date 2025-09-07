@@ -32,3 +32,6 @@ aiokafka
 # Celery
 celery
 
+# User
+fake_useragent
+
