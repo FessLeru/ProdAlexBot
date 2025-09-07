@@ -1,10 +1,10 @@
 import asyncio
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 from decimal import Decimal
 from datetime import datetime
 import json
-from kafka import KafkaProducer
+from aiokafka import AIOKafkaProducer
 
 from api.bitget_api import BitgetAPI
 from database.repositories.limit_order_repo import LimitOrderRepository
@@ -34,10 +34,57 @@ class OrderTracker:
         self.tp_repo = TakeProfitRepository()
         
         # Kafka producer для уведомлений
-        self.kafka_producer = KafkaProducer(
-            bootstrap_servers=[settings.KAFKA_BOOTSTRAP_SERVERS],
-            value_serializer=lambda x: json.dumps(x, default=str).encode('utf-8')
-        )
+        self.kafka_producer: Optional[AIOKafkaProducer] = None
+        self._kafka_started: bool = False
+
+    async def start_kafka_producer(self) -> bool:
+        """
+        Запуск Kafka producer
+        
+        Returns:
+            bool: True если producer успешно запущен
+        """
+        try:    
+            self.kafka_producer = AIOKafkaProducer(
+                bootstrap_servers=settings.KAFKA_SERVERS,
+                value_serializer=lambda x: json.dumps(x, default=str).encode('utf-8'),
+                request_timeout_ms=30000,
+                retry_backoff_ms=100,
+                max_block_ms=5000
+            )
+            
+            await self.kafka_producer.start()
+            self._kafka_started = True
+            
+            logger.info("✅ Kafka producer запущен")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка запуска Kafka producer: {e}")
+            self.kafka_producer = None
+            self._kafka_started = False
+            return False
+
+    async def stop_kafka_producer(self) -> None:
+        """Остановка Kafka producer"""
+        try:
+            if self.kafka_producer and self._kafka_started:
+                await self.kafka_producer.stop()
+                logger.info("✅ Kafka producer остановлен")
+        except Exception as e:
+            logger.error(f"❌ Ошибка остановки Kafka producer: {e}")
+        finally:
+            self.kafka_producer = None
+            self._kafka_started = False
+
+    async def __aenter__(self):
+        """Async context manager entry"""
+        await self.start_kafka_producer()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.stop_kafka_producer()
 
     async def start_trading_for_symbol(self, symbol: str, deposit_amount: Decimal = Decimal('100')) -> bool:
         """
@@ -335,12 +382,15 @@ class OrderTracker:
         except Exception as e:
             logger.error(f"❌ Ошибка отмены ордеров {symbol}: {e}")
 
-    async def _send_order_notification(self, order: OrderModel):
+    async def _send_order_notification(self, order: OrderModel) -> bool:
         """
         Отправка уведомления в Kafka о создании ордера
         
         Args:
             order: Модель ордера
+            
+        Returns:
+            bool: True если сообщение отправлено успешно
         """
         try:
             message = KafkaOrderMessage(
@@ -353,10 +403,15 @@ class OrderTracker:
                 user_id=order.user_id
             )
             
-            self.kafka_producer.send(
-                settings.KAFKA_ORDERS_TOPIC,
-                value=message.dict()
+            # Используем model_dump() вместо устаревшего dict()
+            await self.kafka_producer.send(
+                settings.KAFKA_TOPIC_NOTIFICATIONS,
+                value=message.model_dump()
             )
+            
+            logger.debug(f"✅ Уведомление отправлено для ордера {order.order_id}")
+            return True
             
         except Exception as e:
             logger.error(f"❌ Ошибка отправки уведомления для {order.order_id}: {e}")
+            return False
