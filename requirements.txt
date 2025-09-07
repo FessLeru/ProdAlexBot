@@ -35,3 +35,6 @@ celery
 # User
 fake_useragent
 
+# Redis
+redis
+
