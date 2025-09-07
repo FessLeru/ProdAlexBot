@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 async def start_kafka_consumer() -> None:
     """Запускает Kafka потребителя для уведомлений."""
     consumer = AIOKafkaConsumer(
-        'trading_notifications',
+        settings.KAFKA_TOPIC_NOTIFICATIONS,
         bootstrap_servers=settings.KAFKA_SERVERS,
-        group_id='telegram_bot'
+        group_id='telegram_bot',
+        auto_offset_reset='latest'
     )
     
     await consumer.start()
