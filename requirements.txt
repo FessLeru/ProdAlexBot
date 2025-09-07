@@ -28,6 +28,7 @@ openpyxl
 
 # Kafka
 aiokafka
+kafka
 
 # Celery
 celery
