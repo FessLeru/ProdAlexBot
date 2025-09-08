@@ -175,7 +175,7 @@ class BitgetAPI:
             
             order = await self.exchange.create_market_order(
                 symbol=symbol,
-                side=side.value,
+                side=side,
                 amount=size,
                 params=params
             )
@@ -195,7 +195,7 @@ class BitgetAPI:
                 status=OrderStatus.PENDING
             )
             
-            logger.info(f"✅ Создан маркет-ордер {order['id']} {side.value} {size} {symbol}")
+            logger.info(f"✅ Создан маркет-ордер {order['id']} {side} {size} {symbol}")
             return order_model
             
         except Exception as e:
@@ -228,7 +228,7 @@ class BitgetAPI:
             
             order = await self.exchange.create_limit_order(
                 symbol=symbol,
-                side=side.value,
+                side=side,
                 amount=float(amount),
                 price=float(price),
                 params=params
@@ -246,7 +246,7 @@ class BitgetAPI:
                 status=OrderStatus.PENDING
             )
             
-            logger.info(f"✅ Создан лимит-ордер {order['id']} {side.value} {amount} {symbol} @ {price}")
+            logger.info(f"✅ Создан лимит-ордер {order['id']} {side} {amount} {symbol} @ {price}")
             return order_model
             
         except Exception as e:

@@ -42,7 +42,7 @@ class UserRepository:
             user.api_key_encrypted,
             user.api_secret_encrypted,
             user.api_passphrase_encrypted,
-            user.status.value,
+            user.status,
             float(user.deposit_amount),
             user.is_following_trader,
             user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat()
@@ -133,7 +133,7 @@ class UserRepository:
         """
         # Базовые поля для обновления
         set_clauses = ["status = ?", "updated_at = ?"]
-        params = [status.value, datetime.utcnow().isoformat()]
+        params = [status, datetime.utcnow().isoformat()]
         
         # Добавляем опциональные поля
         if is_following is not None:

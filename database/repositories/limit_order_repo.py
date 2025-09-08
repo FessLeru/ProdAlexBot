@@ -94,19 +94,19 @@ class LimitOrderRepository:
             for update in updates:
                 if update.filled_quantity is not None:
                     db_updates.append((
-                        update.status.value,
+                        update.status,
                         float(update.filled_quantity),
                         update.filled_at.isoformat() if update.filled_at else datetime.utcnow().isoformat(),
                         update.order_id
                     ))
                 else:
                     db_updates.append((
-                        update.status.value,
+                        update.status,
                         update.order_id
                     ))
                 
                 # Подготавливаем кэш
-                cache_updates[f"order_status:{update.order_id}"] = update.status.value
+                cache_updates[f"order_status:{update.order_id}"] = update.status
                 
                 # Получаем символ для инвалидации
                 symbol_query = "SELECT symbol FROM limit_orders WHERE order_id = ?"
@@ -222,7 +222,7 @@ class LimitOrderRepository:
                 order.order_id,
                 float(order.price),
                 float(order.quantity), 
-                order.status.value,
+                order.status,
                 order.grid_level,
                 order.created_at.isoformat() if order.created_at else datetime.utcnow().isoformat()
             )
@@ -233,7 +233,7 @@ class LimitOrderRepository:
             await self.redis_client.setex(
                 f"order_status:{order.order_id}", 
                 self.cache_ttl, 
-                order.status.value
+                order.status
             )
             
             # Инвалидируем кэш списка ордеров

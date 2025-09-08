@@ -1,6 +1,7 @@
 from typing import List
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime
+import logging
 
 from config.constants import (
     GRID_COVERAGE_PERCENT,
@@ -11,6 +12,8 @@ from config.constants import (
     MARKET_ENTRY
 )
 from trading.models import OrderModel, OrderSide, OrderType, OrderStatus, TradingConfig
+
+logger = logging.getLogger(__name__)
 
 def calculate_grid_prices(current_price: Decimal, config: TradingConfig) -> List[Decimal]:
     """
@@ -140,6 +143,16 @@ def build_grid(
         config=config
     )
     
+    # Логируем общую информацию о грид-сетке
+    logger.info(f"🏗️ Построение грид-сетки для {symbol}:")
+    logger.info(f"   💰 Депозит: {deposit_amount} USDT")
+    logger.info(f"   📊 Текущая цена: {current_price}")
+    logger.info(f"   ⚖️ Плечо: {config.leverage}x")
+    logger.info(f"   🔢 Уровней грида: {config.grid_levels}")
+    logger.info(f"   📈 Покрытие: {config.coverage_percent * 100}%")
+    logger.info(f"   🔄 Мартингейл: {config.martingale_multiplier}x")
+    logger.info(f"   📦 Базовое количество: {base_quantity}")
+    
     # Рассчитываем цены для грида
     grid_prices = calculate_grid_prices(current_price, config)
     
@@ -180,6 +193,26 @@ def build_grid(
             )
         
         orders.append(order)
+        
+        # Логируем параметры каждого ордера
+        order_value = order.price * order.quantity
+        margin_required = order_value / Decimal(str(config.leverage))
+        
+        if order.order_type == OrderType.MARKET:
+            logger.info(f"   🎯 Ордер #{i+1:2d} (MARKET): "
+                       f"💵 {order.quantity:.5f} @ {order.price:.5f} = {order_value:.2f} USDT "
+                       f"(маржа: {margin_required:.2f})")
+        else:
+            price_diff_percent = ((order.price - current_price) / current_price * 100)
+            logger.info(f"   📌 Ордер #{i+1:2d} (LIMIT):  "
+                       f"💵 {order.quantity:.5f} @ {order.price:.5f} = {order_value:.2f} USDT "
+                       f"(маржа: {margin_required:.2f}, {price_diff_percent:+.2f}%)")
+    
+    # Итоговая статистика
+    total_value = sum(order.price * order.quantity for order in orders)
+    total_margin = total_value / Decimal(str(config.leverage))
+    logger.info(f"✅ Грид-сетка построена: {len(orders)} ордеров на {total_value:.2f} USDT "
+               f"(требуется маржи: {total_margin:.2f} USDT)")
     
     return orders
 

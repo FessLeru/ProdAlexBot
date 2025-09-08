@@ -74,7 +74,7 @@ class TakeProfitRepository:
             'order_id': take_profit.order_id,
             'price': str(take_profit.price),
             'quantity': str(take_profit.quantity),
-            'status': take_profit.status.value,
+            'status': take_profit.status,
             'created_at': take_profit.created_at.isoformat() if take_profit.created_at else None
         }
         

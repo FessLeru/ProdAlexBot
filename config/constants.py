@@ -14,10 +14,10 @@ RESTART_DELAY: int = 60  # Секунды перед перезапуском п
 # Список монет в формате ccxt 4.5.3 (USDT-M перпетуалы на Bitget)
 COINS = [
     #"JASMY/USDT:USDT",
-    #"GRT/USDT:USDT",
+    "GRT/USDT:USDT",
     #"GALA/USDT:USDT",
     #"WLD/USDT:USDT",
-    "CRV/USDT:USDT",
+    # "CRV/USDT:USDT",
     # "ARB/USDT:USDT",
     # "OP/USDT:USDT",
     # "APT/USDT:USDT",
