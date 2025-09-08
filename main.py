@@ -2,7 +2,7 @@
 import asyncio
 import logging
 
-from config.constants import COINS
+from config.constants import COINS, LEVERAGE
 from config.settings import settings
 from database.connection import db
 from trading.celery_worker import start_master_trading
@@ -27,7 +27,7 @@ def start_trading() -> None:
     logger.info("🎯 Запуск торговых задач")
     
     # Рассчитываем депозит на монету (примерный расчет)
-    deposit_per_coin = 10.0  # USDT на каждую монету
+    deposit_per_coin = 0.25 * LEVERAGE  # USDT на каждую монету
     
     start_master_trading.delay(
         api_key=settings.TRADER_API_KEY,

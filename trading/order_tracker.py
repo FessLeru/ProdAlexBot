@@ -105,9 +105,8 @@ class OrderTracker:
             
             # Устанавливаем плечо и режим маржи
             leverage_ok = await api.set_leverage(symbol, LEVERAGE)
-            margin_ok = await api.set_margin_mode(symbol, MARGIN_MODE)
             
-            if not leverage_ok or not margin_ok:
+            if not leverage_ok:
                 logger.error(f"❌ Не удалось установить настройки для {symbol}")
                 return False
             
