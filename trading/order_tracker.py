@@ -12,7 +12,7 @@ from database.repositories.take_profit_repo import TakeProfitRepository
 from config.constants import LEVERAGE, MARGIN_MODE, CHECK_DELAY, TAKE_PROFIT_PERCENT
 from config.settings import settings
 from trading.grid_builder import build_grid
-from trading.models import OrderModel, OrderStatusUpdate, OrderStatus, KafkaOrderMessage, OrderSide
+from trading.models import OrderModel, OrderStatusUpdate, OrderStatus, KafkaOrderMessage, OrderSide, OrderType
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ class OrderTracker:
             # 4. Размещаем ордера на бирже
             placed_orders = []
             for order in orders:
-                if order.order_type.value == "market":
+                if order.order_type == OrderType.MARKET:
                     # Рыночный ордер - используем номинал в USDT
                     notional_usdt = float(order.quantity * order.price)
                     result = await api.create_market_order(symbol, order.side, notional_usdt)
@@ -149,7 +149,7 @@ class OrderTracker:
                     # Отправляем уведомление в Kafka
                     await self._send_order_notification(order)
                     
-                    logger.info(f"✅ Размещен ордер {order.order_id} {order.side.value} {symbol}")
+                    logger.info(f"✅ Размещен ордер {order.order_id} {order.side} {symbol}")
                 
                 # Небольшая задержка между ордерами
                 await asyncio.sleep(0.1)
