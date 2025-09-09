@@ -11,6 +11,9 @@ from config.constants import (
     LEVERAGE,
     MARKET_ENTRY
 )
+
+# Минимальная сумма для маркетного ордера
+MIN_MARKET_ORDER_AMOUNT = Decimal('0.25')
 from trading.models import OrderModel, OrderSide, OrderType, OrderStatus, TradingConfig
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,41 @@ def calculate_optimal_base_quantity(
     
     return base_quantity.quantize(Decimal('0.00001'), rounding=ROUND_DOWN)
 
+def adjust_base_quantity_for_minimum_amount(
+    base_quantity: Decimal,
+    current_price: Decimal,
+    config: TradingConfig
+) -> Decimal:
+    """
+    Корректирует базовое количество для обеспечения минимальной суммы маркетного ордера
+    
+    Args:
+        base_quantity: Исходное базовое количество
+        current_price: Текущая цена актива
+        config: Конфигурация торговли
+        
+    Returns:
+        Decimal: Скорректированное базовое количество
+    """
+    # Рассчитываем сумму первого ордера (маркетного)
+    first_order_amount = base_quantity * current_price
+    
+    # Если сумма меньше минимальной, корректируем базовое количество
+    if first_order_amount < MIN_MARKET_ORDER_AMOUNT:
+        # Рассчитываем необходимый коэффициент увеличения
+        adjustment_factor = MIN_MARKET_ORDER_AMOUNT / first_order_amount
+        
+        # Применяем корректировку к базовому количеству
+        adjusted_quantity = base_quantity * adjustment_factor
+        
+        logger.warning(f"⚠️ Сумма маркетного ордера {first_order_amount:.4f} USDT меньше минимальной {MIN_MARKET_ORDER_AMOUNT} USDT")
+        logger.info(f"📈 Корректировка базового количества: {base_quantity:.6f} → {adjusted_quantity:.6f} "
+                   f"(коэффициент: {adjustment_factor:.4f}x)")
+        
+        return adjusted_quantity.quantize(Decimal('0.00001'), rounding=ROUND_DOWN)
+    
+    return base_quantity
+
 def build_grid(
     user_id: int,
     position_id: int,
@@ -143,6 +181,13 @@ def build_grid(
         config=config
     )
     
+    # Корректируем базовое количество для обеспечения минимальной суммы маркетного ордера
+    base_quantity = adjust_base_quantity_for_minimum_amount(
+        base_quantity=base_quantity,
+        current_price=current_price,
+        config=config
+    )
+    
     # Логируем общую информацию о грид-сетке
     logger.info(f"🏗️ Построение грид-сетки для {symbol}:")
     logger.info(f"   💰 Депозит: {deposit_amount} USDT")
@@ -152,6 +197,10 @@ def build_grid(
     logger.info(f"   📈 Покрытие: {config.coverage_percent * 100}%")
     logger.info(f"   🔄 Мартингейл: {config.martingale_multiplier}x")
     logger.info(f"   📦 Базовое количество: {base_quantity}")
+    
+    # Показываем сумму маркетного ордера
+    market_order_amount = base_quantity * current_price
+    logger.info(f"   💵 Сумма маркетного ордера: {market_order_amount:.4f} USDT")
     
     # Рассчитываем цены для грида
     grid_prices = calculate_grid_prices(current_price, config)
@@ -311,6 +360,12 @@ def validate_grid_parameters(
         
         if base_quantity <= 0:
             return False
+        
+        # Проверяем минимальную сумму маркетного ордера
+        market_order_amount = base_quantity * current_price
+        if market_order_amount < MIN_MARKET_ORDER_AMOUNT:
+            logger.warning(f"⚠️ Сумма маркетного ордера {market_order_amount:.4f} USDT меньше минимальной {MIN_MARKET_ORDER_AMOUNT} USDT")
+            # Не возвращаем False, так как корректировка будет применена автоматически
         
         return True
         
