@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 GRID_COVERAGE_PERCENT: float = 0.40  # Перекрытие 40%
 GRID_LEVELS: int = 15  # Количество ордеров в сетке
 MARTINGALE_MULTIPLIER: float = 1.30  # Мартингейл 30%
@@ -24,3 +26,5 @@ COINS = [
     # "APE/USDT:USDT",
     # "FLOKI/USDT:USDT"
 ]
+
+MIN_MARKET_ORDER_MARGIN_USDT = Decimal('0.25')
