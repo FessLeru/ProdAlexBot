@@ -5,6 +5,7 @@ import logging
 from config.constants import COINS, LEVERAGE
 from config.settings import settings
 from database.connection import db
+from database.redis_cache import cache_manager
 from trading.celery_worker import start_master_trading
 from telegram.bot import start_bot
 
@@ -15,9 +16,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def clear_redis_cash() -> None:
+    """Очистка старого кэша из Redis."""
+    await cache_manager.clear_all_cache()
+
+
 async def init_database() -> None:
     """Инициализация базы данных."""
     logger.info("🚀 Инициализация системы")
+    await db.drop_db()
     await db.init_db()
     logger.info("✅ База данных готова")
 
@@ -42,6 +49,10 @@ def start_trading() -> None:
 async def main() -> None:
     """Главная функция."""
     try:
+
+        # Очистка Redis
+        await clear_redis_cash()
+
         # Инициализация БД
         await init_database()
         
