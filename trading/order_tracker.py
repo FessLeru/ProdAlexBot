@@ -221,6 +221,8 @@ class OrderTracker:
             api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
             order_info = await api.fetch_order(tp_order.order_id, symbol)
             
+            logger.info(f"🔍 Проверен тейк-профит {tp_order.order_id}: {order_info}")
+
             if order_info:
                 status = order_info.get('status', 'unknown')
                 
