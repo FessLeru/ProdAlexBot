@@ -264,6 +264,7 @@ class OrderTracker:
                 
                 # Проверяем на бирже
                 order_info = await api.fetch_order(order_id, symbol)
+                logger.info(f"🔍 Проверен ордер {order_id}: {order_info}")
                 if not order_info:
                     continue
                 

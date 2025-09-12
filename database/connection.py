@@ -69,5 +69,45 @@ class DatabaseConnection:
         async with self.get_connection() as conn:
             await conn.executemany(query, params_list)
             await conn.commit()
+    
+    async def drop_db(self) -> None:
+        """
+        Удаление всех таблиц из базы данных.
+        
+        Удаляет все таблицы в следующем порядке:
+        - take_profit_orders
+        - limit_orders  
+        - users
+        """
+        async with self.get_connection() as conn:
+            # Получаем список всех таблиц
+            cursor = await conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+            tables = await cursor.fetchall()
+            
+            if not tables:
+                logger.info("База данных пуста, нечего удалять")
+                return
+            
+            # Удаляем таблицы в правильном порядке (с учетом внешних ключей)
+            table_names = [table[0] for table in tables]
+            logger.info(f"Найдены таблицы для удаления: {table_names}")
+            
+            # Отключаем проверку внешних ключей для безопасного удаления
+            await conn.execute("PRAGMA foreign_keys = OFF")
+            
+            for table_name in table_names:
+                try:
+                    await conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    logger.info(f"Таблица '{table_name}' удалена")
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении таблицы '{table_name}': {e}")
+            
+            # Включаем обратно проверку внешних ключей
+            await conn.execute("PRAGMA foreign_keys = ON")
+            await conn.commit()
+            
+            logger.info("Все таблицы успешно удалены из базы данных")
 
 db = DatabaseConnection()
