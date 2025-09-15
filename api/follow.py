@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Подписка фолловера на трейдера Bitget Copy Trading (USDT-FUTURES) с режимом Smart copy.
+Подписка фолловера на трейдера Bybit Copy Trading (USDT-M) с режимом Smart copy.
 В начале выводит доступные USDT-балансы на фьючерсах (USDT-M) у трейдера и фолловера.
 
 Требуется:
   - settings.TRADER_ID — UID элит-трейдера (СТОРОННЕГО!)
-  - FOLLOWER_API_KEY / FOLLOWER_API_SECRET / FOLLOWER_API_PASSPHRASE — ключи фолловера
+  - FOLLOWER_API_KEY / FOLLOWER_API_SECRET — ключи фолловера
   - (для показа баланса трейдера) settings.TRADER_API_* — ключи того трейдера
 
 Управление:
@@ -26,17 +26,15 @@ import requests
 # ========= Конфиг =========
 from config.settings import settings
 
-BITGET_API_BASE = "https://api.bitget.com"
+BYBIT_API_BASE = "https://api.bybit.com"
 
 # Ключи фолловера — ИМИ подписываемся
 FOLLOWER_API_KEY = os.getenv("FOLLOWER_API_KEY", "")
 FOLLOWER_API_SECRET = os.getenv("FOLLOWER_API_SECRET", "")
-FOLLOWER_API_PASSPHRASE = os.getenv("FOLLOWER_API_PASSPHRASE", "")
 
 # Ключи трейдера (нужны только чтобы показать его баланс в начале)
 TRADER_API_KEY = getattr(settings, "TRADER_API_KEY", "") or ""
 TRADER_API_SECRET = getattr(settings, "TRADER_API_SECRET", "") or ""
-TRADER_API_PASSPHRASE = getattr(settings, "TRADER_API_PASSPHRASE", "") or ""
 
 # Идентификатор элит-трейдера, на которого подписываемся
 TRADER_ID = getattr(settings, "TRADER_ID", "")
@@ -55,13 +53,13 @@ _TIME_OFFSET_MS = 0
 
 
 def _get_server_time_ms() -> int:
-    """Получить серверное время Bitget (мс) и обновить смещение."""
+    """Получить серверное время Bybit (мс) и обновить смещение."""
     global _TIME_OFFSET_MS
-    url = BITGET_API_BASE + "/api/spot/v1/public/time"
+    url = BYBIT_API_BASE + "/v5/market/time"
     r = _session.get(url, timeout=10)
     r.raise_for_status()
     j = r.json()
-    server_ms = int(j["data"])
+    server_ms = int(j["result"]["timeSecond"]) * 1000
     local_ms = int(time.time() * 1000)
     _TIME_OFFSET_MS = server_ms - local_ms
     return server_ms
@@ -72,40 +70,35 @@ def _ts_str() -> str:
     return str(int(time.time() * 1000 + _TIME_OFFSET_MS))
 
 
-def _sign(secret: str, timestamp: str, method: str, request_path: str, body: str = "") -> str:
+def _sign(api_key: str, secret: str, timestamp: str, method: str, request_path: str, body: str = "") -> str:
     """
-    ACCESS-SIGN = base64(hmac_sha256(secret, timestamp + method + requestPath + body))
-    ВАЖНО: requestPath ДОЛЖЕН включать ?query, если есть параметры.
-    Для GET тело в подпись не добавляем.
+    Bybit signature: HMAC SHA256(secret, timestamp + api_key + recv_window + body)
     """
-    prehash = f"{timestamp}{method.upper()}{request_path}{body}"
-    digest = hmac.new(secret.encode("utf-8"), prehash.encode("utf-8"), hashlib.sha256).digest()
-    return base64.b64encode(digest).decode()
+    recv_window = "5000"  # 5 секунд окно
+    prehash = f"{timestamp}{api_key}{recv_window}{body}"
+    digest = hmac.new(secret.encode("utf-8"), prehash.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest
 
 
-def _headers(api_key: str, passphrase: str, sign: str, timestamp: str) -> dict:
+def _headers(api_key: str, sign: str, timestamp: str) -> dict:
     return {
-        "ACCESS-KEY": api_key,
-        "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": passphrase,
+        "X-BAPI-API-KEY": api_key,
+        "X-BAPI-SIGN": sign,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": "5000",
         "Content-Type": "application/json",
-        "locale": "en-US",
     }
 
 
 def _request(method: str, path: str, params: dict | None = None, data: dict | None = None):
     """
-    Универсальный запрос к Bitget с корректной подписью.
+    Универсальный запрос к Bybit с корректной подписью.
     Использует FOLLOWER_* ключи (подписка/лимиты/списки и т.п.).
     """
     # Канонизированная query-строка
     query = ""
     if params:
         query = urlencode(sorted(params.items()), doseq=True, safe=":/")
-
-    # requestPath для подписи
-    request_path_for_sign = path + (f"?{query}" if query else "")
 
     # тело без пробелов
     body_str = ""
@@ -123,23 +116,23 @@ def _request(method: str, path: str, params: dict | None = None, data: dict | No
             pass
 
     sign = _sign(
-        FOLLOWER_API_SECRET, ts, method,
-        request_path_for_sign,
+        FOLLOWER_API_KEY, FOLLOWER_API_SECRET, ts, method,
+        path,
         body_str if method.upper() != "GET" else ""
     )
-    headers = _headers(FOLLOWER_API_KEY, FOLLOWER_API_PASSPHRASE, sign, ts)
+    headers = _headers(FOLLOWER_API_KEY, sign, ts)
 
-    url = BITGET_API_BASE + path + (f"?{query}" if query else "")
+    url = BYBIT_API_BASE + path + (f"?{query}" if query else "")
     resp = _session.request(method.upper(), url, headers=headers, data=(body_str or None), timeout=15)
     if not resp.ok:
-        raise RuntimeError(f"Bitget API error {resp.status_code}: {resp.text}")
+        raise RuntimeError(f"Bybit API error {resp.status_code}: {resp.text}")
     j = resp.json()
-    if j.get("code") != "00000":
-        raise RuntimeError(f"Bitget API business error: {j}")
-    return j.get("data")
+    if j.get("retCode") != 0:
+        raise RuntimeError(f"Bybit API business error: {j}")
+    return j.get("result")
 
 
-def _request_with_keys(api_key: str, api_secret: str, passphrase: str,
+def _request_with_keys(api_key: str, api_secret: str,
                        method: str, path: str, params: dict | None = None, data: dict | None = None):
     """
     То же самое, но с передачей произвольных ключей (для получения баланса трейдера/фолловера).
@@ -147,7 +140,6 @@ def _request_with_keys(api_key: str, api_secret: str, passphrase: str,
     query = ""
     if params:
         query = urlencode(sorted(params.items()), doseq=True, safe=":/")
-    request_path_for_sign = path + (f"?{query}" if query else "")
 
     body_str = ""
     if data is not None:
@@ -163,52 +155,60 @@ def _request_with_keys(api_key: str, api_secret: str, passphrase: str,
             pass
 
     sign = _sign(
-        api_secret, ts, method,
-        request_path_for_sign,
+        api_key, api_secret, ts, method,
+        path,
         body_str if method.upper() != "GET" else ""
     )
-    headers = _headers(api_key, passphrase, sign, ts)
+    headers = _headers(api_key, sign, ts)
 
-    url = BITGET_API_BASE + path + (f"?{query}" if query else "")
+    url = BYBIT_API_BASE + path + (f"?{query}" if query else "")
     resp = _session.request(method.upper(), url, headers=headers, data=(body_str or None), timeout=15)
     resp.raise_for_status()
     j = resp.json()
-    if j.get("code") != "00000":
-        raise RuntimeError(f"Bitget API business error: {j}")
-    return j.get("data")
+    if j.get("retCode") != 0:
+        raise RuntimeError(f"Bybit API business error: {j}")
+    return j.get("result")
 
 
 # ========= Балансы =========
 
-def get_futures_available_usdt(api_key: str, api_secret: str, passphrase: str) -> float:
+def get_futures_available_usdt(api_key: str, api_secret: str) -> float:
     """
     Возвращает доступный баланс (available) по USDT на USDT-M фьючерсах.
-    GET /api/v2/mix/account/accounts?productType=USDT-FUTURES
-      -> ищем запись с marginCoin="USDT", берём поле "available".
+    GET /v5/account/wallet-balance?accountType=UNIFIED
+      -> ищем запись с coin="USDT", берём поле "availableBalance".
     """
     data = _request_with_keys(
-        api_key, api_secret, passphrase,
-        "GET", "/api/v2/mix/account/accounts",
-        params={"productType": "USDT-FUTURES"},
+        api_key, api_secret,
+        "GET", "/v5/account/wallet-balance",
+        params={"accountType": "UNIFIED"},
         data=None
     )
-    if not data:
+    if not data or "list" not in data:
         return 0.0
-    acc = next((a for a in data if a.get("marginCoin") == "USDT"), data[0])
-    return float(acc.get("available", "0"))
+    accounts = data["list"]
+    if not accounts:
+        return 0.0
+    # Берем первый аккаунт (обычно основной)
+    account = accounts[0]
+    coins = account.get("coin", [])
+    usdt_coin = next((c for c in coins if c.get("coin") == "USDT"), None)
+    if not usdt_coin:
+        return 0.0
+    return float(usdt_coin.get("availableBalance", "0"))
 
 
 # ========= Конкретные вызовы Copy Trading (Follower API) =========
 
-def get_follow_limits(product_type: str = "USDT-FUTURES", symbol: str | None = None):
+def get_follow_limits(category: str = "linear", symbol: str | None = None):
     """
-    GET /api/v2/copy/mix-follower/query-quantity-limit
+    GET /v5/copytrade/order/list
     (необязательно; полезно для валидации перед подпиской)
     """
-    params = {"productType": product_type}
+    params = {"category": category}
     if symbol:
         params["symbol"] = symbol
-    return _request("GET", "/api/v2/copy/mix-follower/query-quantity-limit", params=params, data=None)
+    return _request("GET", "/v5/copytrade/order/list", params=params, data=None)
 
 
 def follow_with_smart_copy(
@@ -216,7 +216,7 @@ def follow_with_smart_copy(
     copy_amount_usdt: int,
     *,
     copy_all_positions: bool = False,
-    margin_mode: str = "follow_trader",     # "follow_trader" | "crossed_margin" | "isolated_margin"
+    margin_mode: str = "cross",     # "cross" | "isolated"
     leverage_mode: str = "follow_trader",   # "follow_trader" | "fixed_leverage"
     multiple: int | None = None,            # нужно, если leverage_mode == "fixed_leverage"
     equity_guardian: bool = False,
@@ -224,7 +224,7 @@ def follow_with_smart_copy(
     equity_value: int | None = None,
 ):
     """
-    POST /api/v2/copy/mix-follower/copy-settings
+    POST /v5/copytrade/order/create
     Обязательные: traderId, copyAmount (>= 50).
     Включает Smart copy: биржа открывает у фолловера ту же долю от copyAmount,
     какую трейдер открыл от своего элит-баланса.
@@ -236,7 +236,7 @@ def follow_with_smart_copy(
         "leverage": leverage_mode,
     }
     if copy_all_positions:
-        payload["copyAllPostions"] = "yes"  # (sic) орфография поля из доки
+        payload["copyAllPositions"] = "yes"
     if leverage_mode == "fixed_leverage" and multiple:
         payload["multiple"] = str(int(multiple))
     if equity_guardian:
@@ -246,45 +246,45 @@ def follow_with_smart_copy(
             raise ValueError("equity_value обязателен при включённом equity_guardian")
         payload["equity"] = str(int(equity_value))
 
-    return _request("POST", "/api/v2/copy/mix-follower/copy-settings", params=None, data=payload)
+    return _request("POST", "/v5/copytrade/order/create", params=None, data=payload)
 
 
 def get_my_traders(page_no: int = 1, page_size: int = 20):
     """
-    GET /api/v2/copy/mix-follower/query-traders
+    GET /v5/copytrade/order/list
     Список трейдеров, на кого уже подписан фолловер
     """
-    params = {"pageNo": page_no, "pageSize": page_size}
-    return _request("GET", "/api/v2/copy/mix-follower/query-traders", params=params, data=None)
+    params = {"page": page_no, "limit": page_size}
+    return _request("GET", "/v5/copytrade/order/list", params=params, data=None)
 
 
 def unfollow_trader(trader_id: str):
     """
-    POST /api/v2/copy/mix-follower/cancel-trader
+    POST /v5/copytrade/order/cancel
     Отписка от трейдера
     """
     payload = {"traderId": str(trader_id)}
-    return _request("POST", "/api/v2/copy/mix-follower/cancel-trader", params=None, data=payload)
+    return _request("POST", "/v5/copytrade/order/cancel", params=None, data=payload)
 
 
 # ========= Основной сценарий =========
 
 def main():
     # Проверки окружения
-    if not FOLLOWER_API_KEY or not FOLLOWER_API_SECRET or not FOLLOWER_API_PASSPHRASE:
-        raise SystemExit("FOLLOWER_API_* не заданы в окружении")
+    if not FOLLOWER_API_KEY or not FOLLOWER_API_SECRET:
+        raise SystemExit("FOLLOWER_API_KEY и FOLLOWER_API_SECRET не заданы в окружении")
     if not TRADER_ID:
         raise SystemExit("settings.TRADER_ID не задан (UID элит-трейдера)")
 
     # Балансы USDT на фьючерсах у трейдера и фолловера
     try:
         trader_fut = None
-        if TRADER_API_KEY and TRADER_API_SECRET and TRADER_API_PASSPHRASE:
-            trader_fut = get_futures_available_usdt(TRADER_API_KEY, TRADER_API_SECRET, TRADER_API_PASSPHRASE)
+        if TRADER_API_KEY and TRADER_API_SECRET:
+            trader_fut = get_futures_available_usdt(TRADER_API_KEY, TRADER_API_SECRET)
         else:
             print("WARN: не заданы settings.TRADER_API_* — пропускаю вывод баланса трейдера.")
 
-        follower_fut = get_futures_available_usdt(FOLLOWER_API_KEY, FOLLOWER_API_SECRET, FOLLOWER_API_PASSPHRASE)
+        follower_fut = get_futures_available_usdt(FOLLOWER_API_KEY, FOLLOWER_API_SECRET)
 
         print(f"Trader USDT-M futures available: {trader_fut}")
         print(f"Follower USDT-M futures available: {follower_fut}")
@@ -293,8 +293,8 @@ def main():
 
     # (опционально) Проверим лимиты по продукту
     try:
-        limits = get_follow_limits(product_type="USDT-FUTURES")
-        print("Follow limits (USDT-FUTURES):", limits)
+        limits = get_follow_limits(category="linear")
+        print("Follow limits (linear):", limits)
     except Exception as e:
         print("WARN: не удалось получить лимиты:", e)
 
@@ -303,7 +303,7 @@ def main():
         trader_id=TRADER_ID,
         copy_amount_usdt=COPY_AMOUNT_USDT,
         copy_all_positions=COPY_ALL_POSITIONS,
-        margin_mode="follow_trader",
+        margin_mode="cross",
         leverage_mode="follow_trader",
     )
     print("Copy settings result:", result)

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Инициализация Celery с оптимизированными настройками
 celery_app = Celery(
-    'bitget_trading_bot',
+    'bybit_trading_bot',
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND
 )
@@ -52,14 +52,13 @@ def at_start(sender, **kwargs):
     logger.info("🚀 Celery воркер запущен и готов к работе")
 
 @celery_app.task(bind=True, name='start_master_trading')
-def start_master_trading(self, api_key: str, api_secret: str, api_passphrase: str, deposit_per_coin: float = 100.0):
+def start_master_trading(self, api_key: str, api_secret: str, deposit_per_coin: float = 100.0):
     """
     Мастер-задача для запуска торговли по всем монетам
     
     Args:
         api_key: API ключ
         api_secret: API секрет
-        api_passphrase: API пароль
         deposit_per_coin: Депозит на каждую монету в USDT
     """
     logger.info("🎯 Запуск мастер-задачи торговли")
@@ -71,7 +70,6 @@ def start_master_trading(self, api_key: str, api_secret: str, api_passphrase: st
                 symbol=coin,
                 api_key=api_key,
                 api_secret=api_secret,
-                api_passphrase=api_passphrase,
                 deposit_amount=deposit_per_coin
             )
             logger.info(f"📊 Запущена торговля для {coin}")
@@ -84,7 +82,7 @@ def start_master_trading(self, api_key: str, api_secret: str, api_passphrase: st
         raise
 
 @celery_app.task(bind=True, name='start_symbol_trading')
-def start_symbol_trading(self, symbol: str, api_key: str, api_secret: str, api_passphrase: str, deposit_amount: float):
+def start_symbol_trading(self, symbol: str, api_key: str, api_secret: str, deposit_amount: float):
     """
     Запуск торговли для конкретной монеты
     
@@ -92,14 +90,13 @@ def start_symbol_trading(self, symbol: str, api_key: str, api_secret: str, api_p
         symbol: Торговый символ
         api_key: API ключ  
         api_secret: API секрет
-        api_passphrase: API пароль
         deposit_amount: Размер депозита
     """
     logger.info(f"🚀 Запуск торговли для {symbol}")
     
     async def run_trading():
         try:
-            tracker = OrderTracker(api_key, api_secret, api_passphrase)
+            tracker = OrderTracker(api_key, api_secret)
             
             # Запускаем торговлю
             success = await tracker.start_trading_for_symbol(
@@ -113,7 +110,6 @@ def start_symbol_trading(self, symbol: str, api_key: str, api_secret: str, api_p
                     symbol=symbol,
                     api_key=api_key,
                     api_secret=api_secret,
-                    api_passphrase=api_passphrase,
                     deposit_amount=deposit_amount
                 )
                 logger.info(f"✅ Торговля запущена для {symbol}, переходим к отслеживанию")
@@ -133,7 +129,7 @@ def start_symbol_trading(self, symbol: str, api_key: str, api_secret: str, api_p
         loop.close()
 
 @celery_app.task(bind=True, name='track_symbol_continuously')
-def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, api_passphrase: str, deposit_amount: float):
+def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, deposit_amount: float):
     """
     Непрерывное отслеживание ордеров для символа
     
@@ -141,14 +137,13 @@ def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, 
         symbol: Торговый символ
         api_key: API ключ
         api_secret: API секрет  
-        api_passphrase: API пароль
         deposit_amount: Размер депозита
     """
     logger.info(f"👁️ Начинаем отслеживание {symbol}")
     
     async def run_tracking():
         try:
-            tracker = OrderTracker(api_key, api_secret, api_passphrase)
+            tracker = OrderTracker(api_key, api_secret)
             
             # Отслеживаем ордера
             result = await tracker.track_symbol_orders(symbol)
@@ -158,13 +153,13 @@ def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, 
                 logger.info(f"🔄 Планируем перезапуск {symbol} через {RESTART_DELAY} сек")
                 
                 restart_symbol_after_delay.apply_async(
-                    args=[symbol, api_key, api_secret, api_passphrase, deposit_amount],
+                    args=[symbol, api_key, api_secret, deposit_amount],
                     countdown=RESTART_DELAY
                 )
             else:
                 # Продолжаем отслеживание
                 track_symbol_continuously.apply_async(
-                    args=[symbol, api_key, api_secret, api_passphrase, deposit_amount],
+                    args=[symbol, api_key, api_secret, deposit_amount],
                     countdown=2  # Проверяем каждые 2 секунды
                 )
                 
@@ -172,7 +167,7 @@ def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, 
             logger.error(f"❌ Ошибка отслеживания {symbol}: {e}")
             # Перезапускаем отслеживание через 5 секунд при ошибке
             track_symbol_continuously.apply_async(
-                args=[symbol, api_key, api_secret, api_passphrase, deposit_amount],
+                args=[symbol, api_key, api_secret, deposit_amount],
                 countdown=5
             )
     
@@ -185,7 +180,7 @@ def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, 
         loop.close()
 
 @celery_app.task(bind=True, name='restart_symbol_after_delay')
-def restart_symbol_after_delay(self, symbol: str, api_key: str, api_secret: str, api_passphrase: str, deposit_amount: float):
+def restart_symbol_after_delay(self, symbol: str, api_key: str, api_secret: str, deposit_amount: float):
     """
     Перезапуск торговли для символа после задержки
     
@@ -193,7 +188,6 @@ def restart_symbol_after_delay(self, symbol: str, api_key: str, api_secret: str,
         symbol: Торговый символ
         api_key: API ключ
         api_secret: API секрет
-        api_passphrase: API пароль  
         deposit_amount: Размер депозита
     """
     logger.info(f"🔄 Перезапуск торговли для {symbol}")
@@ -203,7 +197,6 @@ def restart_symbol_after_delay(self, symbol: str, api_key: str, api_secret: str,
         symbol=symbol,
         api_key=api_key,
         api_secret=api_secret,
-        api_passphrase=api_passphrase,
         deposit_amount=deposit_amount
     )
 

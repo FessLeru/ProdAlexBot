@@ -97,7 +97,6 @@ class UserModel(BaseModel):
     first_name: Optional[str] = None
     api_key_encrypted: Optional[str] = None
     api_secret_encrypted: Optional[str] = None
-    api_passphrase_encrypted: Optional[str] = None
     status: UserStatus = UserStatus.PENDING
     deposit_amount: Decimal = Decimal('0')
     is_following_trader: bool = False

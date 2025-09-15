@@ -11,4 +11,3 @@ class MyStates(StatesGroup):
     """Состояния для ввода API ключей."""
     api_key = State()
     api_secret = State()
-    api_passphrase = State()

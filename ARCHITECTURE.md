@@ -41,7 +41,7 @@ graph TD
 │   └── restart_symbol_after_delay
 │       └── Перезапуск после ТП
 │
-├── 🔌 Bitget API Client
+├── 🔌 Bybit API Client
 │   ├── Rate Limiting (100 req/min)
 │   ├── Connection Pooling  
 │   ├── Error Handling
@@ -69,7 +69,7 @@ graph TD
 sequenceDiagram
     participant M as Main Process
     participant C as Celery Worker
-    participant B as Bitget API
+    participant B as Bybit API
     participant D as Database
     participant K as Kafka
     participant T as Telegram Bot

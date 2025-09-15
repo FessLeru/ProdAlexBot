@@ -18,9 +18,8 @@ python generate_encryption_key.py
 # Обязательные настройки:
 BOT_TOKEN=your_telegram_bot_token
 ADMIN_TELEGRAM_IDS=123456789
-TRADER_API_KEY=your_bitget_api_key
-TRADER_API_SECRET=your_bitget_api_secret
-TRADER_API_PASSPHRASE=your_bitget_passphrase
+TRADER_API_KEY=your_bybit_api_key
+TRADER_API_SECRET=your_bybit_api_secret
 ENCRYPTION_KEY=generated_key_from_step_1
 
 # По умолчанию (можно не менять):

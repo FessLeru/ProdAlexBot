@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 from aiokafka import AIOKafkaProducer
 
-from api.bitget_api import BitgetAPI
+from api.bybit_api import BybitAPI
 from database.repositories.limit_order_repo import LimitOrderRepository
 from database.repositories.take_profit_repo import TakeProfitRepository
 from config.constants import LEVERAGE, MARGIN_MODE, CHECK_DELAY, TAKE_PROFIT_PERCENT
@@ -17,18 +17,16 @@ from trading.models import OrderModel, OrderStatusUpdate, OrderStatus, KafkaOrde
 logger = logging.getLogger(__name__)
 
 class OrderTracker: 
-    def __init__(self, api_key: str, api_secret: str, api_passphrase: str):
+    def __init__(self, api_key: str, api_secret: str):
         """
         Инициализация трекера
         
         Args:
             api_key: API ключ
-            api_secret: API секрет  
-            api_passphrase: API пароль
+            api_secret: API секрет
         """
         self.api_key = api_key
         self.api_secret = api_secret
-        self.api_passphrase = api_passphrase
         
         self.limit_repo = LimitOrderRepository()
         self.tp_repo = TakeProfitRepository()
@@ -101,7 +99,7 @@ class OrderTracker:
             logger.info(f"🚀 Запуск торговли для {symbol}")
             
             # 1. Инициализируем API и устанавливаем настройки
-            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            api = BybitAPI(self.api_key, self.api_secret)
             
             # Устанавливаем плечо и режим маржи
             leverage_ok = await api.set_leverage(symbol, LEVERAGE)
@@ -235,7 +233,7 @@ class OrderTracker:
                 return None
             
             # Создаем API соединение для проверки
-            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            api = BybitAPI(self.api_key, self.api_secret)
             order_info = await api.fetch_order(tp_order.order_id, symbol)
             
             logger.info(f"🔍 Проверен тейк-профит {tp_order.order_id}: {order_info}")
@@ -276,7 +274,7 @@ class OrderTracker:
         updates = []
         should_update_tp = False
         
-        api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+        api = BybitAPI(self.api_key, self.api_secret)
         
         try:
             for order_id in order_ids:
@@ -346,11 +344,11 @@ class OrderTracker:
             # Отменяем старый тейк-профит
             current_tp = await self.tp_repo.get_active_take_profit(symbol)
             if current_tp:
-                api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+                api = BybitAPI(self.api_key, self.api_secret)
                 await api.cancel_order(current_tp.order_id, symbol)
             
             # Создаем новый тейк-профит на бирже
-            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            api = BybitAPI(self.api_key, self.api_secret)
             tp_order = await api.create_limit_order(
                 symbol=symbol,
                 side=OrderSide.SELL,
@@ -386,7 +384,7 @@ class OrderTracker:
             if not active_orders:
                 return
             
-            api = BitgetAPI(self.api_key, self.api_secret, self.api_passphrase)
+            api = BybitAPI(self.api_key, self.api_secret)
             updates = []
             
             for order_id in active_orders:

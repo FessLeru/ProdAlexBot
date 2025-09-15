@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS users (
     first_name TEXT,
     api_key_encrypted TEXT,
     api_secret_encrypted TEXT,
-    api_passphrase_encrypted TEXT,
     status TEXT DEFAULT 'pending',
     deposit_amount DECIMAL(10,2) DEFAULT 0,
     is_following_trader BOOLEAN DEFAULT FALSE,

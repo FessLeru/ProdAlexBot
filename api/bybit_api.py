@@ -11,26 +11,24 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-class BitgetAPI:
+class BybitAPI:
     """
-    Оптимизированный API клиент для Bitget с поддержкой ccxt 4.5.3
+    Оптимизированный API клиент для Bybit с поддержкой ccxt 4.5.3
     """
     
-    def __init__(self, api_key: str, api_secret: str, api_passphrase: str):
+    def __init__(self, api_key: str, api_secret: str):
         """
         Инициализация API клиента
         
         Args:
             api_key: API ключ
-            api_secret: API секрет  
-            api_passphrase: API пароль
+            api_secret: API секрет
         """
         ua = UserAgent()
         
-        self.exchange = ccxt.bitget({
+        self.exchange = ccxt.bybit({
             'apiKey': api_key,
             'secret': api_secret,
-            'password': api_passphrase,
             'sandbox': False,
             'enableRateLimit': True,
             'rateLimit': 300,
@@ -168,9 +166,7 @@ class BitgetAPI:
                 return None
             
             params = {
-                'marginMode': 'cross',
-                'marginCoin': 'USDT',
-                'timeInForceValue': 'normal',
+                'timeInForce': 'IOC',  # Immediate or Cancel для Bybit
             }
             
             order = await self.exchange.create_market_order(
@@ -222,9 +218,7 @@ class BitgetAPI:
             await self.rate_limiter.acquire(f"create_limit_{symbol}")
             
             params = {
-                'marginMode': 'cross',
-                'marginCoin': 'USDT',
-                'timeInForceValue': 'normal',
+                'timeInForce': 'GTC',  # Good Till Cancel для Bybit
                 'reduceOnly': reduce_only,
             }
             
@@ -313,8 +307,7 @@ class BitgetAPI:
         """
         try:
             await self.rate_limiter.acquire(f"leverage_{symbol}")
-            params = {'marginCoin': 'USDT'}
-            await self.exchange.set_leverage(leverage, symbol, params=params)
+            await self.exchange.set_leverage(leverage, symbol)
             logger.info(f"✅ Установлено плечо {leverage}x для {symbol}")
             return True
         except Exception as e:
@@ -336,12 +329,7 @@ class BitgetAPI:
         """
         try:
             await self.rate_limiter.acquire(f"margin_{symbol}")
-            params = {
-                'symbol': symbol,
-                'marginMode': margin_mode,
-                'marginCoin': 'USDT'
-            }
-            await self.exchange.set_margin_mode(margin_mode, symbol, params=params)
+            await self.exchange.set_margin_mode(margin_mode, symbol)
             logger.info(f"✅ Установлен режим маржи {margin_mode} для {symbol}")
             return True
         except Exception as e:

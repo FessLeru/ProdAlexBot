@@ -95,7 +95,7 @@ def calculate_optimal_base_quantity(deposit_amount, current_price, config):
 │   └── celery_worker.py - асинхронная обработка
 │
 ├── 🔌 API Integration (api/)
-│   └── bitget_api.py - интеграция с Bitget API
+│   └── bybit_api.py - интеграция с Bybit API
 │
 ├── 💾 Database (database/)
 │   ├── connection.py - подключение к SQLite
@@ -117,7 +117,7 @@ def calculate_optimal_base_quantity(deposit_amount, current_price, config):
 1. main.py → Запуск системы
 2. Celery Worker → Создание торговых задач для каждой монеты
 3. OrderTracker → Построение грид-сетки ордеров
-4. BitgetAPI → Размещение ордеров на бирже
+4. BybitAPI → Размещение ордеров на бирже
 5. Database → Сохранение информации об ордерах
 6. Kafka → Уведомления о торговых событиях
 7. Telegram Bot → Получение уведомлений администратором
@@ -159,10 +159,9 @@ BOT_TOKEN=your_telegram_bot_token
 ADMIN_TELEGRAM_IDS=123456789,987654321
 ADMIN_CHAT_ID=your_chat_id
 
-# Bitget API (получить на https://www.bitget.com/api-doc)
+# Bybit API (получить на https://www.bybit.com/app/user/api-management)
 TRADER_API_KEY=your_api_key
 TRADER_API_SECRET=your_api_secret
-TRADER_API_PASSPHRASE=your_api_passphrase
 
 # Генерируем ключ шифрования
 python generate_encryption_key.py
@@ -216,7 +215,6 @@ def start_trading() -> None:
     start_master_trading.delay(
         api_key=settings.TRADER_API_KEY,
         api_secret=settings.TRADER_API_SECRET, 
-        api_passphrase=settings.TRADER_API_PASSPHRASE,
         deposit_per_coin=deposit_per_coin
     )
 ```
@@ -335,7 +333,6 @@ CREATE TABLE users (
     username TEXT,
     api_key_encrypted TEXT,        -- Зашифрованный API ключ
     api_secret_encrypted TEXT,     -- Зашифрованный API секрет
-    api_passphrase_encrypted TEXT, -- Зашифрованный пароль
     deposit_amount DECIMAL(10,2),  -- Размер депозита
     status TEXT DEFAULT 'pending', -- Статус пользователя
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -374,17 +371,16 @@ CREATE TABLE take_profit_orders (
 
 ## 🔌 API интеграция
 
-### Bitget API:
+### Bybit API:
 
-Система использует официальную библиотеку `ccxt` для взаимодействия с биржей Bitget:
+Система использует официальную библиотеку `ccxt` для взаимодействия с биржей Bybit:
 
 ```python
-class BitgetAPI:
-    def __init__(self, api_key, api_secret, api_passphrase):
-        self.exchange = ccxt.bitget({
+class BybitAPI:
+    def __init__(self, api_key, api_secret):
+        self.exchange = ccxt.bybit({
             'apiKey': api_key,
             'secret': api_secret,
-            'password': api_passphrase,
             'sandbox': False,
             'enableRateLimit': True,
             'options': {
@@ -590,7 +586,7 @@ redis-cli ping
 celery -A trading.celery_worker inspect active
 
 # Тест API соединения
-python -c "from api.bitget_api import BitgetAPI; import asyncio; api = BitgetAPI('key', 'secret', 'passphrase'); print(asyncio.run(api.test_connection()))"
+python -c "from api.bybit_api import BybitAPI; import asyncio; api = BybitAPI('key', 'secret'); print(asyncio.run(api.test_connection()))"
 
 # Проверка базы данных
 sqlite3 database.db ".tables"

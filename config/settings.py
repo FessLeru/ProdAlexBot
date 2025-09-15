@@ -15,11 +15,10 @@ class Settings:
     # Database
     DATABASE_PATH: str = "database.db"
     
-    # Bitget API
-    BITGET_API_URL: str = "https://api.bitget.com"
+    # Bybit API
+    BYBIT_API_URL: str = "https://api.bybit.com"
     TRADER_API_KEY: str = os.getenv("TRADER_API_KEY")
     TRADER_API_SECRET: str = os.getenv("TRADER_API_SECRET")
-    TRADER_API_PASSPHRASE: str = os.getenv("TRADER_API_PASSPHRASE")
     
     TRADING_START_DELAY: int = 300  # 5 минут в секундах
     

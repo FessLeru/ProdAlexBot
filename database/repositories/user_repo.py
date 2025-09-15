@@ -30,9 +30,9 @@ class UserRepository:
         query = """
             INSERT INTO users (
                 telegram_id, username, first_name, api_key_encrypted,
-                api_secret_encrypted, api_passphrase_encrypted, status,
+                api_secret_encrypted, status,
                 deposit_amount, is_following_trader, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         
         params = (
@@ -41,7 +41,6 @@ class UserRepository:
             user.first_name,
             user.api_key_encrypted,
             user.api_secret_encrypted,
-            user.api_passphrase_encrypted,
             user.status,
             float(user.deposit_amount),
             user.is_following_trader,
@@ -85,7 +84,6 @@ class UserRepository:
         user_id: int,
         api_key_encrypted: str,
         api_secret_encrypted: str,
-        api_passphrase_encrypted: str
     ) -> None:
         """
         Обновление API ключей пользователя.
@@ -94,19 +92,17 @@ class UserRepository:
             user_id: ID пользователя
             api_key_encrypted: Зашифрованный API ключ
             api_secret_encrypted: Зашифрованный API секрет
-            api_passphrase_encrypted: Зашифрованная API фраза
         """
         query = """
             UPDATE users 
             SET api_key_encrypted = ?, api_secret_encrypted = ?, 
-                api_passphrase_encrypted = ?, updated_at = ?
+                updated_at = ?
             WHERE id = ?
         """
         
         params = (
             api_key_encrypted,
             api_secret_encrypted,
-            api_passphrase_encrypted,
             datetime.utcnow().isoformat(),
             user_id
         )
@@ -251,7 +247,6 @@ class UserRepository:
             first_name=row['first_name'],
             api_key_encrypted=row['api_key_encrypted'],
             api_secret_encrypted=row['api_secret_encrypted'],
-            api_passphrase_encrypted=row['api_passphrase_encrypted'],
             status=UserStatus(row['status']),
             deposit_amount=Decimal(str(row['deposit_amount'])),
             is_following_trader=bool(row['is_following_trader']),

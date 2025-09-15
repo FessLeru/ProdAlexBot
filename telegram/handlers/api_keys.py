@@ -28,37 +28,22 @@ async def api_key_handler(message: Message, state) -> None:
 
 @bot.message_handler(state=MyStates.api_secret)
 async def api_secret_handler(message: Message, state) -> None:
-    """Обработчик ввода API секрета."""
-    state.set(MyStates.api_passphrase)
-    state.add_data(api_secret=message.text.strip())
-    await bot.send_message(
-        message.chat.id,
-        "Отправьте вашу API Passphrase:",
-        parse_mode="HTML"
-    )
-
-
-@bot.message_handler(state=MyStates.api_passphrase)
-async def api_passphrase_handler(message: Message, state) -> None:
-    """Обработчик ввода API фразы и сохранение ключей."""
+    """Обработчик ввода API секрета и сохранение ключей."""
     data = state.get_data()
     api_key = data.get("api_key")
-    api_secret = data.get("api_secret")
-    api_passphrase = message.text.strip()
+    api_secret = message.text.strip()
 
     try:
         # Шифруем ключи
         encrypted_key = encrypt_data(api_key)
         encrypted_secret = encrypt_data(api_secret)
-        encrypted_passphrase = encrypt_data(api_passphrase)
 
         # Сохраняем в БД
         user_repo = UserRepository(db)
         await user_repo.update_api_keys(
             user_id=message.from_user.id,
             api_key_encrypted=encrypted_key,
-            api_secret_encrypted=encrypted_secret,
-            api_passphrase_encrypted=encrypted_passphrase
+            api_secret_encrypted=encrypted_secret
         )
 
         await user_repo.update_user_status(
@@ -69,8 +54,7 @@ async def api_passphrase_handler(message: Message, state) -> None:
 
         await bot.send_message(
             message.chat.id,
-            "✅ API ключи успешно сохранены!\n\n"
-            "Теперь вы участвуете в копи-трейдинге.",
+            "✅ API ключи успешно сохранены!\n\n",
             parse_mode="HTML"
         )
         

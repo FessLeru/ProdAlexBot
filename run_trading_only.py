@@ -29,7 +29,6 @@ async def main() -> None:
         start_master_trading.delay(
             api_key=settings.TRADER_API_KEY,
             api_secret=settings.TRADER_API_SECRET,
-            api_passphrase=settings.TRADER_API_PASSPHRASE,
             deposit_per_coin=deposit_per_coin
         )
         

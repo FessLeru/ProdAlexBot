@@ -29,9 +29,9 @@ async def start_handler(message: Message) -> None:
         await user_repo.create(user_model)
         
     text = (
-        "🤖 Добро пожаловать в торгового бота Bitget!\n\n"
+        "🤖 Добро пожаловать в торгового бота Bybit!\n\n"
         "📋 Доступные команды:\n"
-        "/keys - Добавить API ключи Bitget\n\n"
+        "/keys - Добавить API ключи Bybit\n\n"
         "⚠️ Убедитесь, что API ключи имеют права на торговлю фьючерсами."
     )
     
@@ -44,7 +44,7 @@ async def keys_handler(message: Message) -> None:
     await state_storage.set_state(message.from_user.id, message.chat.id, MyStates.api_key)
     await bot.send_message(
         message.chat.id,
-        "🔐 Добавление API ключей Bitget\n\n"
+        "🔐 Добавление API ключей Bybit\n\n"
         "Отправьте ваш API Key:",
         parse_mode="HTML"
     )

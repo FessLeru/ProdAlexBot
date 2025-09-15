@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_DOWN
 from config.settings import settings
 
 
-async def get_size_from_notional(exchange: ccxt.bitget, symbol: str, notional_usdt: float) -> float:
+async def get_size_from_notional(exchange: ccxt.bybit, symbol: str, notional_usdt: float) -> float:
     """
     Возвращает количество контрактов (size) для указанного НОМИНАЛА сделки (USDT).
     Плечо НЕ учитываем — оно влияет только на требуемую маржу, а не на номинал.
@@ -23,10 +23,9 @@ async def get_size_from_notional(exchange: ccxt.bitget, symbol: str, notional_us
 
 
 async def main():
-    exchange = ccxt.bitget({
+    exchange = ccxt.bybit({
         "apiKey": settings.TRADER_API_KEY,
         "secret": settings.TRADER_API_SECRET,
-        "password": settings.TRADER_API_PASSPHRASE,
         "enableRateLimit": True,
         "options": {
             "defaultType": "swap",       # только USDT-свапы
@@ -50,7 +49,7 @@ async def main():
 
         # Установка плеча
         try:
-            await exchange.set_leverage(leverage, symbol, params={"marginCoin": "USDT"})
+            await exchange.set_leverage(leverage, symbol)
             print(f"Плечо установлено: {leverage}x")
         except Exception as e:
             print("Не удалось установить плечо:", e)
@@ -68,8 +67,6 @@ async def main():
 
         # Общие параметры ордеров
         common_params = {
-            "marginMode": "cross",
-            "marginCoin": "USDT",
             "timeInForce": "GTC",          # для LIMIT-TP
         }
 
