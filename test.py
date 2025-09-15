@@ -7,7 +7,7 @@ from config.settings import settings
 async def get_size_from_notional(exchange: ccxt.bitget, symbol: str, notional_usdt: float) -> float:
     """
     Возвращает количество контрактов (size) для указанного НОМИНАЛА сделки (USDT).
-    Плечо тут НЕ учитываем — оно влияет только на требуемую маржу, а не на номинал.
+    Плечо НЕ учитываем — оно влияет только на требуемую маржу, а не на номинал.
     """
     ticker = await exchange.fetch_ticker(symbol)
     last = ticker.get("last") or ticker.get("close")
@@ -36,11 +36,14 @@ async def main():
     exchange.has["fetchCurrencies"] = False
 
     symbol = "GRT/USDT:USDT"
-    notional_usdt = 1.2
+    notional_usdt = 5.1
     leverage = 20
 
+    # --- на сколько выше входа ставить TP (пример: +1.5%) ---
+    tp_percent = 0.015  # 1.5%
+
     try:
-        # загрузка рынков
+        # Загрузка рынков
         await exchange.load_markets(reload=True, params={"type": "swap"})
         market = exchange.market(symbol)
         print("Инфо о рынке:", {k: market[k] for k in ("symbol", "type", "contractSize", "limits") if k in market})
@@ -52,32 +55,59 @@ async def main():
         except Exception as e:
             print("Не удалось установить плечо:", e)
 
-        # расчет размера
+        # Расчёт размера по номиналу
         size = await get_size_from_notional(exchange, symbol, notional_usdt)
 
-        # проверка минимума
+        # Оценка маржи
         ticker = await exchange.fetch_ticker(symbol)
         last = Decimal(str(ticker.get("last") or ticker.get("close")))
         contract_size = Decimal(str(market.get("contractSize", 1)))
         notional_est = Decimal(str(size)) * last * contract_size
-
         required_margin = notional_est / Decimal(leverage)
         print(f"Оценка маржи при {leverage}x: ~{required_margin:.6f} USDT (номинал ≈ {notional_est:.4f} USDT)")
 
-        params = {
+        # Общие параметры ордеров
+        common_params = {
             "marginMode": "cross",
             "marginCoin": "USDT",
-            "timeInForceValue": "normal",
+            "timeInForce": "GTC",          # для LIMIT-TP
         }
 
+        # --- 1) MARKET BUY ---
         print(f"Создаём MARKET BUY на {notional_usdt} USDT → {size} контракт(ов) {symbol}...")
-        order = await exchange.create_market_order(
+        entry_order = await exchange.create_market_order(
             symbol=symbol,
             side="buy",
             amount=size,
-            params=params
+            params=common_params
         )
-        print("Ордер создан:", order)
+        print("Ордер (вход) создан:", entry_order)
+
+        tp_amount = float(entry_order.get("filled") or entry_order.get("amount") or size)
+        tp_amount = float(exchange.amount_to_precision(symbol, tp_amount))
+
+        # Цена тейк-профита: от текущей последней цены (или цены сделки, если хочешь — возьми entry_order['average'])
+        last_price = float(entry_order.get("average") or last)
+        tp_price = last_price * (1.0 + float(tp_percent))
+        tp_price = float(exchange.price_to_precision(symbol, tp_price))
+
+        # --- 2) LIMIT SELL reduce-only как отдельный ТЕЙК-ПРОФИТ ---
+        # reduceOnly гарантирует закрытие (уменьшение) позиции, а не открытие встречной.
+        tp_params = {
+            **common_params,
+            "reduceOnly": True,
+        }
+
+        print(f"Ставим TP: LIMIT SELL reduce-only {tp_amount} @ {tp_price} ({tp_percent*100:.2f}%)...")
+        tp_order = await exchange.create_order(
+            symbol=symbol,
+            type="limit",
+            side="sell",
+            amount=tp_amount,
+            price=tp_price,
+            params=tp_params,
+        )
+        print("Тейк-профит создан:", tp_order)
 
     except Exception as e:
         print("Ошибка:", e)

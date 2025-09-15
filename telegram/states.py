@@ -1,11 +1,14 @@
 """Состояния для Telegram бота."""
 from telebot.asyncio_storage import StateMemoryStorage
+from telebot.states import StatesGroup, State
 
 
 # Создание хранилища состояний
 state_storage = StateMemoryStorage()
 
-# Состояния для ввода API ключей
-API_KEY_STATE = "api_key"
-API_SECRET_STATE = "api_secret"  
-API_PASSPHRASE_STATE = "api_passphrase"
+
+class MyStates(StatesGroup):
+    """Состояния для ввода API ключей."""
+    api_key = State()
+    api_secret = State()
+    api_passphrase = State()

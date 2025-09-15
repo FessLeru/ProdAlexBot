@@ -131,7 +131,21 @@ class OrderTracker:
                 if order.order_type == OrderType.MARKET:
                     # Рыночный ордер - используем номинал в USDT
                     notional_usdt = float(order.quantity * order.price)
-                    result = await api.create_market_order(symbol, order.side, notional_usdt)
+                    market_order = await api.create_market_order(symbol, order.side, notional_usdt)
+                    
+                    # Рассчитываем цену тейк-профита: средняя цена * (1 + TP_PERCENT)
+                    take_profit_price = market_order.price * Decimal(str(1 + TAKE_PROFIT_PERCENT))
+                    
+                    logger.info(f"🎯 Расчет тейк-профита {symbol}: цена входа={market_order.price}, TP={take_profit_price} (+{TAKE_PROFIT_PERCENT}%)")
+                    
+                    # Создаем тейк-профит на закрытие позиции
+                    result = await api.create_limit_order(
+                        symbol,
+                        OrderSide.SELL,  # Всегда продаем для закрытия длинной позиции
+                        market_order.quantity,
+                        take_profit_price,
+                        reduce_only=True
+                    )
                 else:
                     # Лимитный ордер
                     result = await api.create_limit_order(symbol, order.side, order.quantity, order.price)
@@ -143,7 +157,10 @@ class OrderTracker:
                     order.position_id = result.position_id
                     
                     # Сохраняем в БД
-                    await self.limit_repo.save_order(order)
+                    if order.order_type == OrderType.LIMIT:
+                        await self.limit_repo.save_order(order)
+                    elif order.order_type == OrderType.MARKET:
+                        await self.tp_repo.create_take_profit(symbol, order.order_id, order.price, order.quantity)
                     placed_orders.append(order)
                     
                     # Отправляем уведомление в Kafka
@@ -225,9 +242,13 @@ class OrderTracker:
 
             if order_info:
                 status = order_info.get('status', 'unknown')
+                filled_qty = order_info.get('filled', 0)
+                
+                logger.info(f"🔍 Проверен тейк-профит {tp_order.order_id}: статус={status}, заполнено={filled_qty}")
                 
                 if status in ['closed', 'filled']:
                     # Тейк-профит исполнен
+                    logger.info(f"🎯 Тейк-профит {tp_order.order_id} исполнен - закрываем позицию")
                     await self.tp_repo.mark_filled(tp_order.order_id)
                     
                     # Отменяем все оставшиеся ордера
@@ -320,6 +341,8 @@ class OrderTracker:
             tp_price = avg_price * Decimal(str(1 + TAKE_PROFIT_PERCENT))
             total_quantity = summary['total_quantity']
             
+            logger.info(f"🎯 Обновление тейк-профита {symbol}: средняя цена={avg_price}, TP={tp_price} (+{TAKE_PROFIT_PERCENT}%), количество={total_quantity}")
+            
             # Отменяем старый тейк-профит
             current_tp = await self.tp_repo.get_active_take_profit(symbol)
             if current_tp:
@@ -332,7 +355,8 @@ class OrderTracker:
                 symbol=symbol,
                 side=OrderSide.SELL,
                 amount=total_quantity,
-                price=tp_price
+                price=tp_price,
+                reduce_only=True
             )
             
             if tp_order:

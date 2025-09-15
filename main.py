@@ -49,6 +49,7 @@ def start_trading() -> None:
 async def main() -> None:
     """Главная функция."""
     try:
+        logger.info("🚀 Запуск системы торгового бота")
 
         # Очистка Redis
         await clear_redis_cash()
@@ -59,7 +60,6 @@ async def main() -> None:
         # Запуск торговли
         start_trading()
         
-        # Запуск бота (блокирующий)
         await start_bot()
         
     except KeyboardInterrupt:
@@ -67,6 +67,8 @@ async def main() -> None:
     except Exception as e:
         logger.error(f"❌ Критическая ошибка: {e}")
         raise
+    finally:
+        logger.info("👋 Система завершена")
 
 
 if __name__ == "__main__":

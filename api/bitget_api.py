@@ -204,7 +204,7 @@ class BitgetAPI:
         finally:
             await self.close()
 
-    async def create_limit_order(self, symbol: str, side: OrderSide, amount: Decimal, price: Decimal) -> Optional[OrderModel]:
+    async def create_limit_order(self, symbol: str, side: OrderSide, amount: Decimal, price: Decimal, reduce_only: bool = False) -> Optional[OrderModel]:
         """
         Создание лимит-ордера
         
@@ -213,6 +213,7 @@ class BitgetAPI:
             side: Сторона ордера
             amount: Количество
             price: Цена
+            reduce_only: Флаг для ордеров на закрытие позиции
             
         Returns:
             Optional[OrderModel]: Модель ордера или None при ошибке
@@ -224,6 +225,7 @@ class BitgetAPI:
                 'marginMode': 'cross',
                 'marginCoin': 'USDT',
                 'timeInForceValue': 'normal',
+                'reduceOnly': reduce_only,
             }
             
             order = await self.exchange.create_limit_order(

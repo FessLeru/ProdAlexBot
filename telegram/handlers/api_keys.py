@@ -9,43 +9,16 @@ from database.repositories.user_repo import UserRepository
 from trading.models import UserStatus
 from utils.encryption import encrypt_data
 from telegram.bot_instance import bot
-from telegram.states import (
-    state_storage, 
-    API_KEY_STATE, 
-    API_SECRET_STATE, 
-    API_PASSPHRASE_STATE
-)
+from telegram.states import state_storage, MyStates
 
 logger = logging.getLogger(__name__)
 
 
-async def is_api_key_state(message: Message) -> bool:
-    """Проверка состояния API ключа."""
-    current_state = await state_storage.get_state(message.from_user.id, message.chat.id)
-    return current_state == API_KEY_STATE
-
-
-async def is_api_secret_state(message: Message) -> bool:
-    """Проверка состояния API секрета."""
-    current_state = await state_storage.get_state(message.from_user.id, message.chat.id)
-    return current_state == API_SECRET_STATE
-
-
-async def is_api_passphrase_state(message: Message) -> bool:
-    """Проверка состояния API фразы."""
-    current_state = await state_storage.get_state(message.from_user.id, message.chat.id)
-    return current_state == API_PASSPHRASE_STATE
-
-
-@bot.message_handler(func=is_api_key_state)
-async def api_key_handler(message: Message) -> None:
+@bot.message_handler(state=MyStates.api_key)
+async def api_key_handler(message: Message, state) -> None:
     """Обработчик ввода API ключа."""
-    await state_storage.set_data(
-        message.from_user.id, 
-        message.chat.id, 
-        {"api_key": message.text.strip()}
-    )
-    await state_storage.set_state(message.from_user.id, message.chat.id, API_SECRET_STATE)
+    state.set(MyStates.api_secret)
+    state.add_data(api_key=message.text.strip())
     await bot.send_message(
         message.chat.id,
         "Отправьте ваш API Secret:",
@@ -53,13 +26,11 @@ async def api_key_handler(message: Message) -> None:
     )
 
 
-@bot.message_handler(func=is_api_secret_state)
-async def api_secret_handler(message: Message) -> None:
+@bot.message_handler(state=MyStates.api_secret)
+async def api_secret_handler(message: Message, state) -> None:
     """Обработчик ввода API секрета."""
-    data = await state_storage.get_data(message.from_user.id, message.chat.id) or {}
-    data["api_secret"] = message.text.strip()
-    await state_storage.set_data(message.from_user.id, message.chat.id, data)
-    await state_storage.set_state(message.from_user.id, message.chat.id, API_PASSPHRASE_STATE)
+    state.set(MyStates.api_passphrase)
+    state.add_data(api_secret=message.text.strip())
     await bot.send_message(
         message.chat.id,
         "Отправьте вашу API Passphrase:",
@@ -67,10 +38,10 @@ async def api_secret_handler(message: Message) -> None:
     )
 
 
-@bot.message_handler(func=is_api_passphrase_state)
-async def api_passphrase_handler(message: Message) -> None:
+@bot.message_handler(state=MyStates.api_passphrase)
+async def api_passphrase_handler(message: Message, state) -> None:
     """Обработчик ввода API фразы и сохранение ключей."""
-    data = await state_storage.get_data(message.from_user.id, message.chat.id) or {}
+    data = state.get_data()
     api_key = data.get("api_key")
     api_secret = data.get("api_secret")
     api_passphrase = message.text.strip()
@@ -113,13 +84,17 @@ async def api_passphrase_handler(message: Message) -> None:
             "❌ Ошибка сохранения ключей. Попробуйте снова."
         )
 
-    await state_storage.delete_state(message.from_user.id, message.chat.id)
+    state.delete_state()
 
 
 async def _notify_admin(text: str) -> None:
     """Уведомление администратора."""
     try:
         for admin_id in settings.ADMIN_TELEGRAM_IDS:
-            await bot.send_message(admin_id, text)
+            try:
+                await bot.send_message(admin_id, text)
+                logger.debug(f"Уведомление отправлено администратору {admin_id}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления администратору {admin_id}: {e}")
     except Exception as e:
-        logger.error(f"Ошибка уведомления админа: {e}")
+        logger.error(f"Общая ошибка уведомления администраторов: {e}")
