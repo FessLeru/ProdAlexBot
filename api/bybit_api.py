@@ -338,6 +338,29 @@ class BybitAPI:
         finally:
             await self.close()
 
+    async def set_position_mode(self, hedged: bool, symbol: str) -> bool:
+        """
+        Установка режима позиций
+        
+        Args:
+            hedged: False = One-Way Mode, True = Hedge Mode
+            symbol: Торговый символ
+            
+        Returns:
+            bool: True если успешно установлен
+        """
+        try:
+            await self.rate_limiter.acquire(f"position_mode_{symbol}")
+            await self.exchange.set_position_mode(hedged, symbol)
+            mode_name = "Hedge Mode" if hedged else "One-Way Mode"
+            logger.info(f"✅ Установлен режим позиций {mode_name} для {symbol}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка установки режима позиций для {symbol}: {e}")
+            return False
+        finally:
+            await self.close()
+
     def get_api_stats(self) -> Dict:
         """
         Получение статистики использования API
