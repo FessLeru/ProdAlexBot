@@ -36,16 +36,16 @@ class Settings:
     MAX_CONCURRENT_REQUESTS: int = 3  # Уменьшено
     
     # Redis
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "10"))
     
     # Celery
-    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
-    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
     
     # Kafka
-    KAFKA_SERVERS: List[str] = os.getenv("KAFKA_SERVERS", "localhost:9092").split(",")
-    KAFKA_TOPIC_NOTIFICATIONS: str = "trading_notifications"
+    KAFKA_SERVERS: List[str] = os.getenv("KAFKA_SERVERS", "kafka:29092").split(",")
+    KAFKA_TOPIC_NOTIFICATIONS: str = os.getenv("KAFKA_TOPIC_NOTIFICATIONS", "trading_notifications")
     
     class Config:
         env_file = ".env"

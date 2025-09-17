@@ -29,7 +29,7 @@ services:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 2181 || exit 1"]
+      test: ["CMD-SHELL", "nc -z zookeeper 2181 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,8 +50,8 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -59,7 +59,7 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:29092", "--list"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -78,10 +78,30 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      # Redis
       - REDIS_URL=redis://redis:6379/0
+      - REDIS_MAX_CONNECTIONS=10
+      
+      # Celery
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      
+      # Kafka
       - KAFKA_SERVERS=kafka:29092
+      - KAFKA_TOPIC_NOTIFICATIONS=trading_notifications
+      
+      # Telegram Bot
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_TELEGRAM_IDS=${ADMIN_TELEGRAM_IDS}
+      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
+      
+      # Bybit API
+      - TRADER_API_KEY=${TRADER_API_KEY}
+      - TRADER_API_SECRET=${TRADER_API_SECRET}
+      - TRADER_ID=${TRADER_ID}
+      
+      # Encryption
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
     volumes:
       - ./logs:/app/logs
       - ./database.db:/app/database.db
@@ -102,10 +122,25 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      # Redis
       - REDIS_URL=redis://redis:6379/0
+      - REDIS_MAX_CONNECTIONS=10
+      
+      # Celery
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      
+      # Kafka
       - KAFKA_SERVERS=kafka:29092
+      - KAFKA_TOPIC_NOTIFICATIONS=trading_notifications
+      
+      # Bybit API
+      - TRADER_API_KEY=${TRADER_API_KEY}
+      - TRADER_API_SECRET=${TRADER_API_SECRET}
+      - TRADER_ID=${TRADER_ID}
+      
+      # Encryption
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
     volumes:
       - ./logs:/app/logs
       - ./database.db:/app/database.db
