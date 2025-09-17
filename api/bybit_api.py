@@ -167,6 +167,7 @@ class BybitAPI:
             
             params = {
                 'timeInForce': 'IOC',  # Immediate or Cancel для Bybit
+                'acknowledged': True
             }
             
             order = await self.exchange.create_market_order(
@@ -220,6 +221,7 @@ class BybitAPI:
             params = {
                 'timeInForce': 'GTC',  # Good Till Cancel для Bybit
                 'reduceOnly': reduce_only,
+                'acknowledged': True
             }
             
             order = await self.exchange.create_limit_order(
@@ -264,7 +266,12 @@ class BybitAPI:
         """
         try:
             await self.rate_limiter.acquire(f"cancel_{symbol}")
-            await self.exchange.cancel_order(order_id, symbol)
+            
+            params = {
+                'acknowledged': True
+            }
+            
+            await self.exchange.cancel_order(order_id, symbol, params=params)
             logger.info(f"✅ Отменен ордер {order_id}")
             return True
         except Exception as e:
@@ -286,7 +293,10 @@ class BybitAPI:
         """
         try:
             await self.rate_limiter.acquire(f"fetch_{symbol}")
-            order = await self.exchange.fetch_order(order_id, symbol)
+            params = {
+                'acknowledged': True
+            }
+            order = await self.exchange.fetch_order(order_id, symbol, params=params)
             return order
         except Exception as e:
             logger.error(f"❌ Ошибка получения ордера {order_id}: {e}")
@@ -307,7 +317,12 @@ class BybitAPI:
         """
         try:
             await self.rate_limiter.acquire(f"leverage_{symbol}")
-            await self.exchange.set_leverage(leverage, symbol)
+            
+            params = {
+                'acknowledged': True
+            }
+            
+            await self.exchange.set_leverage(leverage, symbol, params=params)
             logger.info(f"✅ Установлено плечо {leverage}x для {symbol}")
             return True
         except Exception as e:
@@ -329,7 +344,12 @@ class BybitAPI:
         """
         try:
             await self.rate_limiter.acquire(f"margin_{symbol}")
-            await self.exchange.set_margin_mode(margin_mode, symbol)
+            
+            params = {
+                'acknowledged': True
+            }
+            
+            await self.exchange.set_margin_mode(margin_mode, symbol, params=params)
             logger.info(f"✅ Установлен режим маржи {margin_mode} для {symbol}")
             return True
         except Exception as e:
@@ -351,7 +371,12 @@ class BybitAPI:
         """
         try:
             await self.rate_limiter.acquire(f"position_mode_{symbol}")
-            await self.exchange.set_position_mode(hedged, symbol)
+            
+            params = {
+                'acknowledged': True
+            }
+            
+            await self.exchange.set_position_mode(hedged, symbol, params=params)
             mode_name = "Hedge Mode" if hedged else "One-Way Mode"
             logger.info(f"✅ Установлен режим позиций {mode_name} для {symbol}")
             return True
