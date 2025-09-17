@@ -98,14 +98,7 @@ class OrderTracker:
         try:
             logger.info(f"🚀 Запуск торговли для {symbol}")
             
-            # 1. Инициализируем Kafka producer для уведомлений
-            if not self._kafka_started:
-                kafka_ok = await self.start_kafka_producer()
-                if not kafka_ok:
-                    logger.error(f"❌ Не удалось запустить Kafka producer для {symbol}")
-                    return False
-            
-            # 2. Инициализируем API и устанавливаем настройки
+            # 1. Инициализируем API и устанавливаем настройки
             api = BybitAPI(self.api_key, self.api_secret)
             
             # Устанавливаем плечо и режим маржи
@@ -115,13 +108,13 @@ class OrderTracker:
             if not leverage_ok or not one_way_ok:
                 logger.error(f"❌ Не удалось установить настройки для {symbol}")
                         
-            # 3. Получаем текущую цену
+            # 2. Получаем текущую цену
             current_price = await api.get_ticker_price(symbol)
             if not current_price:
                 logger.error(f"❌ Не удалось получить цену {symbol}")
                 return False
             
-            # 4. Строим сетку ордеров
+            # 3. Строим сетку ордеров
             orders = build_grid(
                 user_id=1,  # Пока хардкод, потом можно параметризовать
                 position_id=1,
@@ -130,7 +123,7 @@ class OrderTracker:
                 deposit_amount=deposit_amount
             )
             
-            # 5. Размещаем ордера на бирже
+            # 4. Размещаем ордера на бирже
             placed_orders = []
             for order in orders:
                 if order.order_type == OrderType.MARKET:
@@ -174,7 +167,7 @@ class OrderTracker:
                     logger.info(f"✅ Размещен ордер {order.order_id} {order.side} {symbol}")
                 
                 # Небольшая задержка между ордерами
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
             
             logger.info(f"✅ Сетка открыта для {symbol}: {len(placed_orders)}/{len(orders)} ордеров")
             return len(placed_orders) > 0
@@ -194,19 +187,13 @@ class OrderTracker:
             Optional[str]: 'restart' если нужен перезапуск, None если продолжаем
         """
         try:
-            # 1. Инициализируем Kafka producer если нужно
-            if not self._kafka_started:
-                kafka_ok = await self.start_kafka_producer()
-                if not kafka_ok:
-                    logger.error(f"❌ Не удалось запустить Kafka producer для отслеживания {symbol}")
-            
-            # 2. Проверяем тейк-профит
+            # 1. Проверяем тейк-профит
             tp_result = await self._check_take_profit(symbol)
             if tp_result == 'filled':
                 logger.info(f"🎯 Тейк-профит исполнен для {symbol} - требуется перезапуск")
                 return 'restart'
             
-            # 3. Получаем активные лимитные ордера  
+            # 2. Получаем активные лимитные ордера  
             active_order_ids = await self.limit_repo.get_active_orders_ids(symbol)
             
             if not active_order_ids:
@@ -430,11 +417,6 @@ class OrderTracker:
             bool: True если сообщение отправлено успешно
         """
         try:
-            # Проверяем, что Kafka producer инициализирован
-            if not self.kafka_producer:
-                logger.warning(f"⚠️ Kafka producer не инициализирован, пропускаем уведомление для {order.order_id}")
-                return False
-            
             message = KafkaOrderMessage(
                 symbol=order.symbol,
                 order_id=order.order_id,
