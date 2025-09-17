@@ -19,6 +19,7 @@ class Settings:
     BYBIT_API_URL: str = "https://api.bybit.com"
     TRADER_API_KEY: str = os.getenv("TRADER_API_KEY")
     TRADER_API_SECRET: str = os.getenv("TRADER_API_SECRET")
+    TRADER_ID: str = os.getenv("TRADER_ID")
     
     TRADING_START_DELAY: int = 300  # 5 минут в секундах
     

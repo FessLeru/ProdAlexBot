@@ -10,7 +10,6 @@ from config.constants import (
     TAKE_PROFIT_PERCENT,
     LEVERAGE,
     MARKET_ENTRY,
-    MIN_MARKET_ORDER_MARGIN_USDT
 )
 
 from trading.models import OrderModel, OrderSide, OrderType, OrderStatus, TradingConfig
@@ -98,7 +97,7 @@ def calculate_optimal_base_quantity(
     config: TradingConfig
 ) -> Decimal:
     """
-    ИСПРАВЛЕНО: Правильно рассчитывает базовое количество так, 
+    Рассчитывает базовое количество так, 
     чтобы общая маржа была равна депозиту
 
     Args:
@@ -122,60 +121,6 @@ def calculate_optimal_base_quantity(
 
     return base_quantity.quantize(Decimal('0.00001'), rounding=ROUND_DOWN)
 
-def validate_minimum_market_order(
-    base_quantity: Decimal,
-    current_price: Decimal,
-    config: TradingConfig
-) -> bool:
-    """
-    Проверяет что первый маркет-ордер имеет достаточную маржу
-
-    Args:
-        base_quantity: Базовое количество
-        current_price: Текущая цена
-        config: Конфигурация торговли
-
-    Returns:
-        bool: True если маржа достаточна
-    """
-    # Рассчитываем маржу первого ордера
-    market_order_value = current_price * base_quantity
-    market_order_margin = market_order_value / Decimal(str(config.leverage))
-
-    return market_order_margin >= MIN_MARKET_ORDER_MARGIN_USDT
-
-def adjust_for_minimum_market_order(
-    deposit_amount: Decimal,
-    current_price: Decimal,
-    config: TradingConfig
-) -> Decimal:
-    """
-    Корректирует базовое количество если первый ордер слишком мал
-
-    Args:
-        deposit_amount: Размер депозита
-        current_price: Текущая цена
-        config: Конфигурация торговли
-
-    Returns:
-        Decimal: Скорректированное базовое количество
-    """
-    # Рассчитываем оптимальное базовое количество
-    base_quantity = calculate_optimal_base_quantity(deposit_amount, current_price, config)
-
-    # Проверяем минимум для первого ордера
-    if not validate_minimum_market_order(base_quantity, current_price, config):
-        # Рассчитываем минимальное базовое количество
-        leverage = Decimal(str(config.leverage))
-        min_base_quantity = (MIN_MARKET_ORDER_MARGIN_USDT * leverage) / current_price
-
-        logger.warning(f"⚠️ Базовое количество {base_quantity} слишком мало для первого ордера")
-        logger.warning(f"⚠️ Увеличиваем до минимального: {min_base_quantity}")
-
-        return min_base_quantity.quantize(Decimal('0.00001'), rounding=ROUND_DOWN)
-
-    return base_quantity
-
 def build_grid(
     user_id: int,
     position_id: int,
@@ -185,7 +130,7 @@ def build_grid(
     config: TradingConfig = None
 ) -> List[OrderModel]:
     """
-    ИСПРАВЛЕНО: Строит сетку ордеров с правильным расчетом маржи
+    Строит сетку ордеров с точным расчетом маржи
 
     Args:
         user_id: ID пользователя
@@ -207,8 +152,8 @@ def build_grid(
             take_profit_percent=TAKE_PROFIT_PERCENT
         )
 
-    # Рассчитываем базовое количество с учетом минимума
-    base_quantity = adjust_for_minimum_market_order(
+    # Рассчитываем базовое количество для точного соответствия депозиту
+    base_quantity = calculate_optimal_base_quantity(
         deposit_amount=deposit_amount,
         current_price=current_price,
         config=config
@@ -224,7 +169,7 @@ def build_grid(
     # Логируем информацию о грид-сетке
     logger.info(f"🏗️ Построение грид-сетки для {symbol}:")
     logger.info(f"   💰 Запрошенный депозит: {deposit_amount} USDT")
-    logger.info(f"   💰 Фактическая общая маржа: {actual_total_margin:.2f} USDT")
+    logger.info(f"   💰 Фактическая общая маржа: {actual_total_margin:.6f} USDT")
     logger.info(f"   📊 Текущая цена: {current_price}")
     logger.info(f"   ⚖️ Плечо: {config.leverage}x")
     logger.info(f"   🔢 Уровней грида: {config.grid_levels}")
@@ -232,11 +177,6 @@ def build_grid(
     logger.info(f"   🔄 Мартингейл: {config.martingale_multiplier}x")
     logger.info(f"   📦 Базовое количество: {base_quantity}")
     logger.info(f"   🎯 Общий множитель: {total_multiplier}")
-
-    # Предупреждение если фактическая маржа сильно отличается от запрошенной
-    margin_diff_percent = abs(actual_total_margin - deposit_amount) / deposit_amount * 100
-    if margin_diff_percent > 5:  # Больше 5% разницы
-        logger.warning(f"⚠️ Фактическая маржа отличается от запрошенной на {margin_diff_percent:.1f}%")
 
     orders = []
 
@@ -290,19 +230,18 @@ def build_grid(
 
         if order.order_type == OrderType.MARKET:
             logger.info(f"   🎯 Ордер #{i+1:2d} (MARKET): "
-                       f"💵 {order.quantity:.5f} @ {order.price:.5f} = {order_value:.2f} USDT "
-                       f"(маржа: {margin_required:.2f} USDT)")
+                       f"💵 {order.quantity:.5f} @ {order.price:.5f} = {order_value:.6f} USDT "
+                       f"(маржа: {margin_required:.6f} USDT)")
         else:
             price_diff_percent = ((order.price - current_price) / current_price * 100)
             logger.info(f"   📌 Ордер #{i+1:2d} (LIMIT):  "
-                       f"💵 {order.quantity:.5f} @ {order.price:.5f} = {order_value:.2f} USDT "
-                       f"(маржа: {margin_required:.2f} USDT, {price_diff_percent:+.2f}%)")
+                       f"💵 {order.quantity:.5f} @ {order.price:.5f} = {order_value:.6f} USDT "
+                       f"(маржа: {margin_required:.6f} USDT, {price_diff_percent:+.2f}%)")
 
     # Итоговая статистика с проверкой
     logger.info(f"✅ Грид-сетка построена: {len(orders)} ордеров")
-    logger.info(f"   💰 Проверка общей маржи: {total_margin_check:.2f} USDT")
-    logger.info(f"   ✓ Первый ордер маржа: {(orders[0].price * orders[0].quantity / leverage):.2f} USDT "
-               f"(мин: {MIN_MARKET_ORDER_MARGIN_USDT} USDT)")
+    logger.info(f"   💰 Проверка общей маржи: {total_margin_check:.6f} USDT")
+    logger.info(f"   ✓ Первый ордер маржа: {(orders[0].price * orders[0].quantity / leverage):.6f} USDT")
 
     return orders
 
@@ -399,14 +338,6 @@ def validate_grid_parameters(
             logger.error("❌ Плечо должно быть минимум 1")
             return False
 
-        # Проверяем минимальный размер депозита для первого ордера
-        leverage = Decimal(str(config.leverage))
-        min_deposit_for_first_order = MIN_MARKET_ORDER_MARGIN_USDT
-
-        if deposit_amount < min_deposit_for_first_order:
-            logger.error(f"❌ Депозит должен быть минимум {min_deposit_for_first_order} USDT")
-            return False
-
         return True
 
     except Exception as e:
@@ -477,10 +408,5 @@ def get_grid_statistics(orders: List[OrderModel], config: TradingConfig) -> dict
             "spread_percent": float((max_price - min_price) / max_price * 100)
         },
         "order_details": order_details,
-        "validation": {
-            "min_market_order_margin": float(MIN_MARKET_ORDER_MARGIN_USDT),
-            "first_order_margin": float(orders[0].price * orders[0].quantity / Decimal(str(config.leverage))),
-            "margin_check_passed": float(orders[0].price * orders[0].quantity / Decimal(str(config.leverage))) >= float(MIN_MARKET_ORDER_MARGIN_USDT)
-        },
         "created_at": orders[0].created_at.isoformat() if orders[0].created_at else None
     }

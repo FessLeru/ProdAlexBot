@@ -35,7 +35,7 @@ async def main():
     exchange.has["fetchCurrencies"] = False
 
     symbol = "GRT/USDT:USDT"
-    notional_usdt = 5.1
+    notional_usdt = 1
     leverage = 20
 
     # --- на сколько выше входа ставить TP (пример: +1.5%) ---
@@ -46,6 +46,20 @@ async def main():
         await exchange.load_markets(reload=True, params={"type": "swap"})
         market = exchange.market(symbol)
         print("Инфо о рынке:", {k: market[k] for k in ("symbol", "type", "contractSize", "limits") if k in market})
+
+        # Установка режима позиций (обязательно для Bybit)
+        try:
+            await exchange.set_position_mode(False, symbol)  # False = One-Way Mode
+            print("Режим позиций установлен: One-Way")
+        except Exception as e:
+            print("Не удалось установить режим позиций:", e)
+
+        # Установка режима маржи
+        try:
+            await exchange.set_margin_mode("cross", symbol)  # cross margin
+            print("Режим маржи установлен: Cross")
+        except Exception as e:
+            print("Не удалось установить режим маржи:", e)
 
         # Установка плеча
         try:
@@ -68,6 +82,7 @@ async def main():
         # Общие параметры ордеров
         common_params = {
             "timeInForce": "GTC",          # для LIMIT-TP
+            "positionIdx": 0,              # One-Way Mode
         }
 
         # --- 1) MARKET BUY ---
@@ -93,6 +108,7 @@ async def main():
         tp_params = {
             **common_params,
             "reduceOnly": True,
+            "positionIdx": 0,              # One-Way Mode
         }
 
         print(f"Ставим TP: LIMIT SELL reduce-only {tp_amount} @ {tp_price} ({tp_percent*100:.2f}%)...")

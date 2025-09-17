@@ -15,8 +15,8 @@ RESTART_DELAY: int = 60  # Секунды перед перезапуском п
 # Список монет в формате ccxt 4.5.3
 COINS = [
     #"JASMY/USDT:USDT",
-    # GRT/USDT:USDT",
-    # "GALA/USDT:USDT",
+    #"GRT/USDT:USDT",
+    #"GALA/USDT:USDT",
     # "WLD/USDT:USDT",
     "CRV/USDT:USDT",
     # "ARB/USDT:USDT",
@@ -25,5 +25,3 @@ COINS = [
     # "APE/USDT:USDT",
     # "FLOKI/USDT:USDT"
 ]
-
-MIN_MARKET_ORDER_MARGIN_USDT = Decimal('0.25')
