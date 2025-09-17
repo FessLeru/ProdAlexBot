@@ -293,7 +293,6 @@ class OrderTracker:
                 filled_qty = order_info.get('filled', 0)
                 
                 if status == 'open':
-                    # Ордер не исполнен - останавливаем проверку (оптимизация)
                     break
                     
                 elif status in ['closed', 'filled', 'partial-filled']:
@@ -313,7 +312,7 @@ class OrderTracker:
                         break
                 
                 # Небольшая задержка между запросами
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.1)
                 
         except Exception as e:
             logger.error(f"❌ Ошибка проверки ордеров {symbol}: {e}")

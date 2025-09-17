@@ -9,19 +9,19 @@ MARGIN_MODE: str = "cross"  # Кросс-маржа
 MARKET_ENTRY: bool = True  # Покупаем сразу по маркету
 
 # Временные интервалы
-CHECK_DELAY: float = 2.0  # Секунды между проверками ордеров
-RESTART_DELAY: int = 60  # Секунды перед перезапуском после тейк-профита
+CHECK_DELAY: float = 1.0  # Секунды между проверками ордеров (уменьшено для быстрого реагирования)
+RESTART_DELAY: int = 30  # Секунды перед перезапуском после тейк-профита (уменьшено)
 
 # Список монет в формате ccxt 4.5.3
 COINS = [
-    #"JASMY/USDT:USDT",
-    #"GRT/USDT:USDT",
-    #"GALA/USDT:USDT",
+    "JASMY/USDT:USDT",
+    "GRT/USDT:USDT",
+    "GALA/USDT:USDT",
     # "WLD/USDT:USDT",
     "CRV/USDT:USDT",
-    # "ARB/USDT:USDT",
-    # "OP/USDT:USDT",
+    "THETA/USDT:USDT",
+    "SXP/USDT:USDT",
     # "APT/USDT:USDT",
     # "APE/USDT:USDT",
-    # "FLOKI/USDT:USDT"
+    "ALGO/USDT:USDT"
 ]

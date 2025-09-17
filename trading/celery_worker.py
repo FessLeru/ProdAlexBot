@@ -160,15 +160,15 @@ def track_symbol_continuously(self, symbol: str, api_key: str, api_secret: str, 
                 # Продолжаем отслеживание
                 track_symbol_continuously.apply_async(
                     args=[symbol, api_key, api_secret, deposit_amount],
-                    countdown=2  # Проверяем каждые 2 секунды
+                    countdown=1
                 )
                 
         except Exception as e:
             logger.error(f"❌ Ошибка отслеживания {symbol}: {e}")
-            # Перезапускаем отслеживание через 5 секунд при ошибке
+            # Перезапускаем отслеживание через 2 секунды при ошибке
             track_symbol_continuously.apply_async(
                 args=[symbol, api_key, api_secret, deposit_amount],
-                countdown=5
+                countdown=2
             )
     
     # Запускаем в новом event loop
