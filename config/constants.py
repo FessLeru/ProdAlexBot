@@ -18,7 +18,7 @@ COINS = [
     "GRT/USDT:USDT",
     "GALA/USDT:USDT",
     # "WLD/USDT:USDT",
-    "CRV/USDT:USDT",
+    #"CRV/USDT:USDT",
     "THETA/USDT:USDT",
     "SXP/USDT:USDT",
     # "APT/USDT:USDT",
