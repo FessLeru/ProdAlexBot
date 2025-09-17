@@ -107,8 +107,7 @@ class OrderTracker:
             
             if not leverage_ok or not one_way_ok:
                 logger.error(f"❌ Не удалось установить настройки для {symbol}")
-                return False
-            
+                        
             # 2. Получаем текущую цену
             current_price = await api.get_ticker_price(symbol)
             if not current_price:
